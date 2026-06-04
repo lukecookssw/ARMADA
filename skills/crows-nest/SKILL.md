@@ -1,23 +1,32 @@
 ---
 name: crows-nest
 description: >
-  The ARMADA lookout. Keeps watch for new GitHub issues and dispatches each one into the fleet
-  to be built. Runs as a recurring watch via /loop: each tick lists open issues carrying the
-  configured trigger label that aren't already claimed, claims the next one, and hands it to
-  shipwright (or flagship) to implement. Trigger when the user says "watch for issues", "start
-  the crows-nest", "keep an eye on the backlog", "listen for new issues", "man the lookout", or
-  invokes /crows-nest. Accepts an optional trigger label (default from .armada/config.json, else
-  "armada") and an optional poll interval.
+  The ARMADA lookout. Keeps two watches over a GitHub repo: a new-issue watch that dispatches
+  each labelled issue into the fleet to be built, and a ready-PR watch that drives each labelled
+  pull request through a review → address → re-validate → gated-merge pipeline. Runs as a
+  recurring watch via /loop: each tick claims the next eligible issue or PR and dispatches it.
+  Trigger when the user says "watch for issues", "start the crows-nest", "keep an eye on the
+  backlog", "listen for new issues", "watch for ready PRs", "review and merge PRs", "man the
+  lookout", or invokes /crows-nest. Accepts an optional trigger label (default from
+  .armada/config.json, else "armada") and an optional poll interval.
 ---
 
-# crows-nest — watch for new issues and dispatch them
+# crows-nest — watch issues and ready PRs, and dispatch them
 
 `crows-nest` is ARMADA's entry point: the lookout that turns a GitHub backlog into a stream of
-work for the fleet. It does **one tick of triage** each time it runs, and `/loop` is what makes
-it run again and again unattended:
+work for the fleet. It keeps **two watches** and does **one tick of triage** each time it runs;
+`/loop` is what makes it run again and again unattended:
 
-> **Arm a `/loop`** → each tick **list new labelled issues** → **claim the next one** → **dispatch
-> it** to [`shipwright`](../shipwright/SKILL.md) (or `flagship`) → repeat.
+> **New-issue watch:** **list new labelled issues** → **claim the next one** → **dispatch it** to
+> [`shipwright`](../shipwright/SKILL.md) (or `flagship`) to build → repeat.
+>
+> **Ready-PR watch:** **list ready labelled PRs** → **claim the next one** → **drive it** through a
+> [`muster`](../muster/SKILL.md) review → shipwright address → re-validate → **gated** merge
+> pipeline → repeat.
+
+The two watches share the lookout's wiring (label discipline, atomic claim, bounded loop) but key
+off different objects and label tracks. The new-issue watch is §2; the ready-PR watch and its
+pipeline are §5. A single `/loop` line can arm one or both (§3).
 
 ## How the watch is wired (read this first)
 
@@ -41,6 +50,10 @@ Read `.armada/config.json` from the target repo:
 - `dispatch` — how to hand off a claimed issue: `"shipwright"` (one build pass, default) or
   `"flagship"` (autonomous drive-to-merge loop).
 - `baseBranch` — default base for new work.
+- `commands` — the project's `build`/`test`/`lint` (the ready-PR pipeline re-validates with these).
+- `autoMerge` — whether the ready-PR pipeline may perform the final merge. **Default `false`**: with
+  it off the pipeline reviews, addresses, and re-validates but **stops before merging** (§5.5). Only
+  `true` lets the lookout merge, and only when every other gate passes. See [Safety](#6-stopping-and-safety).
 
 **If the config or the labels are missing, the repo isn't commissioned** — run the
 [`commission`](../commission/SKILL.md) skill first (it detects commands, writes the config, and
@@ -53,14 +66,32 @@ make it count.
 
 ### Claimed-state convention
 
-The lookout tracks issue state purely through labels so it survives restarts:
+The lookout tracks state purely through labels so it survives restarts. There are **two label
+tracks** — one for issues moving through the build, one for PRs moving through the review pipeline:
+
+**Issue track (the new-issue watch, §2):**
 
 - `armada` — eligible, not yet picked up.
 - `armada:underway` — claimed; a tick is building it (or it has an open branch/PR).
 - `armada:done` — a PR has been opened (set by the dispatched skill / on handoff).
 - `armada:blocked` — the fleet gave up; needs a human. Skipped by future ticks.
 
-## 2. One tick of the watch
+**PR track (the ready-PR watch, §5):**
+
+- `armada` — on a PR, shipwright adds this when it opens the PR; it marks the PR as in-fleet and
+  eligible for the review pipeline. (Same arming switch as issues: remove it to disarm.)
+- `armada:reviewing` — claimed by the ready-PR watch; a review → address → verify → merge pipeline
+  is running against it. Mid-pipeline PRs are skipped by future ticks (the idempotency guard).
+- `armada:merged` — the pipeline merged it. Only ever set when `autoMerge` is enabled **and** every
+  gate passed.
+- `armada:blocked` — the pipeline stopped and needs a human: a blocking finding, red CI, no
+  convergence within the bounded loop, or `autoMerge` off and the PR is sitting "ready to merge,
+  awaiting human".
+
+`armada:reviewing` and `armada:merged` are created by [`commission`](../commission/SKILL.md)
+alongside the issue-track labels.
+
+## 2. One tick of the new-issue watch
 
 Each tick does exactly this, then returns:
 
@@ -165,38 +196,199 @@ Print a one-line summary so the loop's history is legible:
 crows-nest tick: 3 eligible · picked #142 "Add CSV export" · dispatched to shipwright · PR #150 opened
 ```
 
-## 3. Arm the loop — hand the /loop line to the user
+## 3. One tick of the ready-PR watch
+
+The second watch is a separate tick that operates on **pull requests**, not issues. It can be armed
+on its own `/loop` or folded into the same tick as the new-issue watch (§5). Each tick:
+
+### 3a. List eligible PRs
+
+```bash
+gh pr list --label "<triggerLabel>" --state open \
+  --json number,title,isDraft,labels,headRefName,mergeable,statusCheckRollup,updatedAt --limit 50
+```
+
+A PR is **ready** — eligible for the pipeline — when **all** hold:
+
+- it is **open** and **not draft**;
+- it carries the `<triggerLabel>` (`armada`) — shipwright adds this when it opens the PR;
+- **CI is not failing** — `statusCheckRollup` has no `FAILURE`/`ERROR`/`TIMED_OUT` checks (pending
+  is fine to re-check next tick; a green or not-yet-failing rollup passes this stage);
+- it isn't **already mid-pipeline** — not labelled `armada:reviewing`, and not already
+  `armada:merged` or `armada:blocked` (terminal states a future tick must not re-pick).
+
+Filter out anything that fails a condition. This eligibility check is the ready-PR analogue of §2a's
+issue dedup, and `armada:reviewing` is the idempotency guard that stops a second tick double-driving
+the same PR.
+
+### 3b. Pick the next PR
+
+Oldest-update-first (FIFO on `updatedAt`), **one PR per tick** by default — the pipeline spawns
+subagents and merges, so sequential is safer unattended. If nothing is eligible, log
+`crows-nest: harbour clear` and return.
+
+### 3c. Claim it
+
+```bash
+gh pr edit <n> --add-label "armada:reviewing"
+gh pr comment <n> --body "🔭 crows-nest: ready-PR pipeline started — review → address → re-validate → gated merge."
+```
+
+### 3d. Drive the pipeline
+
+Hand the claimed PR to the **review→merge Workflow** (§4). The Workflow returns a single terminal
+result the lookout maps to the PR-track labels (§3e). The lookout itself stays thin: it claims,
+launches the Workflow, and records the outcome — it does **not** carry the review or build
+transcripts (those live in the subagents' own contexts).
+
+### 3e. Record the outcome
+
+Map the Workflow's terminal result to a PR-track label and a comment — a PR must **never** be left
+on `armada:reviewing`:
+
+- `merged` → `gh pr edit <n> --remove-label "armada:reviewing" --add-label "armada:merged"`; comment
+  the merge commit. (Only reachable with `autoMerge: true` and all gates green.)
+- `ready_awaiting_human` → `gh pr edit <n> --remove-label "armada:reviewing"` (leave `armada` on so a
+  human sees it); comment "✅ reviewed, addressed, green — **awaiting human merge** (auto-merge off)".
+  This is the default terminal state when `autoMerge` is off.
+- `blocked` → `gh pr edit <n> --remove-label "armada:reviewing" --add-label "armada:blocked"`; comment
+  the reason (blocking finding, red CI, no convergence, non-mergeable, branch protection unmet).
+
+### 3f. Report the tick
+
+```
+crows-nest PR tick: 2 ready · picked #150 "Add CSV export" · 1 blocking → addressed · green · awaiting human merge (auto-merge off)
+```
+
+## 4. The review→merge pipeline (a Workflow)
+
+Steps 4.1–4.5 are driven as a **Workflow**, not ad-hoc inline turns: a deterministic graph of
+stages — **parallel review fan-out → consolidate → address → verify → gated merge** — with explicit
+state passed between stages and a single terminal result. A Workflow (rather than a chat loop) is
+what gives multi-agent control its determinism: each stage's output is structured, the fan-out is
+genuinely parallel, and the merge gate is evaluated from data, not from prose the model might
+misread. It reuses the **parallel-reviewers + dedupe** pattern that [`muster`](../muster/SKILL.md)
+implements internally.
+
+The pipeline runs against one PR `<n>` already claimed `armada:reviewing` (§3c).
+
+### 4.1 Review (parallel fan-out → consolidate)
+
+Dispatch [`muster`](../muster/SKILL.md) against PR `<n>` as a subagent (via the **`Agent` tool**,
+non-interactive, isolated context). `muster` runs its **two lenses in parallel subagents**
+(code-review + `codex:codex-rescue`), dedupes by file+title, posts inline comments + a summary on
+the PR, and **returns the consolidated structured findings** `{severity,file,line,title,detail}`.
+
+The lookout keeps only the structured return — not the review transcript. The gate is computed from
+`summary.blocking`: any blocking finding means the PR cannot merge this round (it must first be
+addressed). A **degraded** review (one or both lenses failed) is **not** a green light — treat a
+missing review as "not safe to merge", never as "no findings".
+
+### 4.2 Address (subagent)
+
+If there are findings to act on, re-dispatch [`shipwright`](../shipwright/SKILL.md) in
+**address-review mode** as a subagent against PR `<n>`, handing it the findings. Shipwright triages
+each comment (agree / discuss / disagree + one-line rationale), implements the agreed changes,
+re-validates, pushes to the PR branch, and replies per thread — see shipwright's address-review
+section. It returns a structured result: what it changed, what it declined and why, and the new
+head sha.
+
+If `muster` found nothing actionable, skip straight to verify.
+
+### 4.3 Verify (re-validate)
+
+After an address pass, re-run the project's checks against the updated head and print results:
+
+```bash
+<commands.build> && <commands.test> && <commands.lint>   # from .armada/config.json
+gh pr checks <n>                                          # CI rollup on the pushed commit
+```
+
+Both the local gate and the CI rollup must be green to advance. Pending CI → re-check next tick
+(leave `armada:reviewing` on so the tick re-enters here), don't merge on yellow.
+
+### 4.4 Bounded address↔review loop
+
+If the address pass changed code, **re-review** the new head (back to 4.1) so fixes are themselves
+reviewed and no blocking finding is left standing. Bound this loop: **`maxReviewRounds` (default 2)**.
+On reaching the cap without convergence (blocking findings still open, or checks still red),
+**stop** and return `blocked` with "no convergence after N rounds" — do not keep looping or merge
+through unresolved blockers.
+
+### 4.5 Gated merge
+
+Compute the merge decision from data. **Merge only if every one of these holds:**
+
+1. `autoMerge: true` in `.armada/config.json` (**default false** — see §6);
+2. no unresolved **blocking** finding (`summary.blocking == 0` on the latest review);
+3. CI is **green** (`gh pr checks <n>` all passing) — never on red or pending;
+4. the PR is **not draft** and GitHub reports it **`mergeable`**;
+5. the repo's **branch protections / required reviews are satisfied** (let GitHub be the source of
+   truth — if `gh pr merge` is refused for an unmet protection, that's a `blocked`, not a retry).
+
+If all hold, merge with the **configured method** and record `merged`:
+
+```bash
+gh pr merge <n> --<mergeMethod>   # merge | squash | rebase, from config (default: repo default)
+```
+
+If `autoMerge` is **false** but 2–5 all hold, the PR is genuinely ready — return
+`ready_awaiting_human` (stop-before-merge; never merge). If any of 2–5 fail, return `blocked` with
+the specific reason. Either way the Workflow yields exactly one terminal result for §3e to label.
+
+## 5. Arm the loop — hand the /loop line to the user
 
 `crows-nest` can't type `/loop` itself, so compose the command and hand it over. Pick the interval
-from the user (default ~5 minutes; faster burns API for little gain on a slow backlog):
+from the user (default ~5 minutes; faster burns API for little gain on a slow backlog). Arm the
+new-issue watch, the ready-PR watch, or both:
 
 ```text
-/loop 5m Run the crows-nest skill: do one watch tick for label "armada" — list eligible open issues, claim the next one, and dispatch it to shipwright. If the horizon is clear, report that and wait for the next tick.
+# New-issue watch (build the backlog):
+/loop 5m Run the crows-nest skill: do one new-issue watch tick for label "armada" — list eligible open issues, claim the next one, and dispatch it to shipwright. If the horizon is clear, report that and wait.
+
+# Ready-PR watch (review → address → gated merge):
+/loop 5m Run the crows-nest skill: do one ready-PR watch tick for label "armada" — list ready PRs, claim the next one, and drive it through the review→merge Workflow. If the harbour is clear, report that and wait.
 ```
 
 Tell the user: *"Paste that to arm the lookout, or I can do single ticks on demand."* Note that
-`/loop` with no interval lets the model self-pace, and that they can stop it any time. If `/loop`
-is unavailable in their environment, offer to run manual ticks (§2) when asked.
+`/loop` with no interval lets the model self-pace, and that they can stop it any time. Remind them
+that **auto-merge is off by default**, so the ready-PR watch stops at "awaiting human merge" until
+they set `autoMerge: true`. If `/loop` is unavailable, offer to run manual ticks (§2/§3) on demand.
 
-## 4. Stopping and safety
+## 6. Stopping and safety
 
 - **Stop** is the user's call (`/loop` is interruptible). The lookout never decides to stop the
-  watch on its own; it only reports `horizon clear` and waits.
-- The fleet **opens PRs but never merges.** `crows-nest` only escalates an issue to a build; a human
-  still merges.
-- **Label discipline is the safety rail.** Because the lookout acts only on `triggerLabel`, you
-  arm autonomy by adding the label and disarm it by removing it — per issue, no code change needed.
+  watch on its own; it only reports `horizon clear` / `harbour clear` and waits.
+- **Gated auto-merge — off by default.** The ready-PR pipeline introduces merging, which reverses
+  ARMADA's original "never merges" rail. That reversal is **deliberate and gated**:
+  - `autoMerge` defaults **false**. With it off the pipeline reviews, addresses, and re-validates,
+    then **stops at "ready to merge, awaiting human"** — it **never merges**. The original rail is
+    the default; you opt in.
+  - Even with `autoMerge: true`, the lookout **never** merges on **red CI**, an **unresolved
+    blocking finding**, a **draft**, a **non-`mergeable`** PR, or when **branch protections /
+    required reviews aren't satisfied** (§4.5). GitHub is the source of truth for protections —
+    a refused `gh pr merge` is a `blocked`, not a retry.
+  - The address↔review loop is **bounded** (`maxReviewRounds`, default 2); on no convergence the PR
+    is labelled `armada:blocked` and handed back. Blocked PRs are always **labelled + commented**,
+    never left mid-pipeline on `armada:reviewing`.
+- **Label discipline is the safety rail.** The lookout acts only on `triggerLabel`, so you arm
+  autonomy by adding `armada` and **disarm it by removing the label** — on an issue or a PR, per
+  object, no code change needed. Removing `armada` from a PR takes it out of the ready-PR watch.
 - If a tick errors (network, `gh` auth, rate limit), report it and let the next interval retry;
   don't spin-retry inside one tick.
 
 ## Inputs
 
 - `label` *(optional)* — the trigger label to watch. Defaults to `.armada/config.json` → `triggerLabel`, else `armada`.
+- `watch` *(optional)* — `issues` | `prs` | `both`. Which watch a tick runs. Defaults to `issues`.
 - `interval` *(optional)* — poll cadence for the `/loop` line. Default ~5m.
 - `dispatch` *(optional)* — `shipwright` | `flagship`. Defaults to config, else `shipwright`.
 
 ## Output
 
-- A composed `/loop` command the user can paste to arm the watch.
-- Per tick: eligible count, the issue picked (if any), the dispatch target, and the resulting PR.
-- Issue labels kept in sync (`armada` → `armada:underway` → `armada:done` / `armada:blocked`).
+- A composed `/loop` command the user can paste to arm the new-issue and/or ready-PR watch.
+- Per new-issue tick: eligible count, the issue picked (if any), the dispatch target, the PR.
+- Per ready-PR tick: ready count, the PR picked (if any), the pipeline outcome (merged / awaiting
+  human / blocked + reason).
+- Labels kept in sync — issues `armada` → `armada:underway` → `armada:done` / `armada:blocked`;
+  PRs `armada` → `armada:reviewing` → `armada:merged` / `armada:blocked`.
