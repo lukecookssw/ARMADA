@@ -23,10 +23,10 @@ the right skill from natural language — you rarely type the name.
 | **`commission`** | The bootstrap. Sets ARMADA up in a repo: detects build/test commands, writes `.armada/config.json`, creates the GitHub labels. Idempotent. | ✅ shipped |
 | **`crows-nest`** | The lookout. Runs under `/loop` and watches for new GitHub issues, then dispatches each one into the fleet. | ✅ shipped |
 | **`shipwright`** | The builder. Takes one issue and works it end-to-end in an isolated worktree, opening a PR. | ✅ shipped |
+| **`muster`** | Inspection before sailing. Reviews a ready PR through two parallel lenses (code-review + codex-rescue), dedupes, and posts inline comments + a summary. | ✅ shipped |
 | `flagship` | The command vessel. An autonomous build → review → verify → fix loop that drives an issue all the way to merge-ready. | 🚧 roadmap |
 | `sea-trial` | The shakedown run. Launches the app and drives a real flow with Playwright to verify a change works at runtime. | 🚧 roadmap |
 | `logbook` | The voyage record. Records a narrated "done" walkthrough video for stakeholders. | 🚧 roadmap |
-| `muster` | Inspection before sailing. Reviews the diff against the project's conventions. | 🚧 roadmap |
 | `signal-flags` | Signals back. Addresses reviewer comments on a PR and replies to each thread. | 🚧 roadmap |
 | `cargo-manifest` | The manifest. Writes task/PR documentation for completed work. | 🚧 roadmap |
 
