@@ -1,5 +1,7 @@
 # ⚓ ARMADA
 
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/fae51aca-c048-40e9-8a80-573cc7aa000d" />
+
 **A**utonomous **R**ecursive **M**ulti-**A**gent **D**evelopment **A**ssembler.
 
 ARMADA is a fleet of [Claude Code](https://claude.com/claude-code) skills. One skill keeps
