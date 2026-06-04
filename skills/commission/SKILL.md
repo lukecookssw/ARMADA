@@ -64,6 +64,7 @@ overwriting** — the user may have hand-tuned it.
   "triggerLabel": "armada",        // crows-nest only acts on issues/PRs with this label
   "dispatch": "shipwright",        // "shipwright" (one build pass) or "flagship" (auto loop)
   "baseBranch": "<detected default>",
+  "authors": "",                   // "" = act on anyone; "alice" or "alice,bob" to restrict by author
   "autoMerge": false,              // ready-PR pipeline may merge? Default false: stop-before-merge.
   "mergeMethod": "squash",         // merge | squash | rebase, when autoMerge is true
   "maxReviewRounds": 2,            // bound on the address↔review loop before handing back
@@ -77,8 +78,13 @@ overwriting** — the user may have hand-tuned it.
 }
 ```
 
+Write `authors` as `""` by default so the fresh repo acts on issues from anyone (no behaviour
+change). It's an optional allowlist — leave it blank, set a single username (`"calumjs"`), or a
+comma-separated list (`"calumjs, dependabot[bot]"`) to restrict which issue authors crows-nest will
+pick up (matched case-insensitively; see crows-nest §2a).
+
 Add `.armada/` is fine to commit (it's project config, not secrets). Mention that the user can edit
-`triggerLabel`/`dispatch` later. **Write `autoMerge: false`** — never commission a repo with
+`triggerLabel`/`dispatch`/`authors` later. **Write `autoMerge: false`** — never commission a repo with
 auto-merge on; opting into autonomous merging is a deliberate, explicit choice the user makes later
 by hand (see the README Safety section). `mergeMethod`/`maxReviewRounds` only take effect once the
 user turns `autoMerge` on.
@@ -115,6 +121,7 @@ and don't arm the loop for them** (both are the user's call):
 ⚓ ARMADA commissioned in <owner/repo>.
   base branch : <base>
   build/test  : <commands, or "none detected — skills will infer">
+  authors     : <"" = anyone, or the configured allowlist>
   auto-merge  : off (default) — ready-PR pipeline stops at "awaiting human merge"
   labels      : armada, armada:underway, armada:done, armada:reviewing, armada:merged, armada:blocked ✓
 
