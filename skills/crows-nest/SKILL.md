@@ -41,6 +41,15 @@ Read `.armada/config.json` from the target repo:
 - `dispatch` — how to hand off a claimed issue: `"shipwright"` (one build pass, default) or
   `"flagship"` (autonomous drive-to-merge loop).
 - `baseBranch` — default base for new work.
+- `authors` — optional allowlist of issue authors the lookout may act on (default `""` = anyone).
+  Read it now; you apply it in §2a. Accepted forms:
+  - **Blank / omitted / empty `""`** → the filter is **off**; process issues from anyone (current
+    behaviour — existing setups are unaffected).
+  - **A single username** — e.g. `"calumjs"` → only that author.
+  - **A comma-separated list** — e.g. `"calumjs, dependabot[bot]"` → any author in the list
+    (surrounding whitespace around each name is trimmed).
+  - **A JSON array** — e.g. `["alice", "bob"]` → same as the comma-separated form. The string form
+    is the documented/primary shape; the array is accepted for convenience.
 
 **If the config or the labels are missing, the repo isn't commissioned** — run the
 [`commission`](../commission/SKILL.md) skill first (it detects commands, writes the config, and
@@ -68,7 +77,7 @@ Each tick does exactly this, then returns:
 
 ```bash
 gh issue list --label "<triggerLabel>" --state open \
-  --json number,title,labels,createdAt,assignees --limit 50
+  --json number,title,labels,createdAt,assignees,author --limit 50
 ```
 
 Filter **out** any issue that is already:
@@ -78,6 +87,29 @@ Filter **out** any issue that is already:
 
 That dedup check is what keeps the loop idempotent — a tick that fires while the previous build is
 still running must not double-pick.
+
+#### Author allowlist
+
+After the dedup filter above, apply the `authors` allowlist from §1 (config → `authors`):
+
+- **If `authors` is blank / omitted / empty (`""`) → skip this filter entirely** and process
+  everyone. This is the default and means existing setups behave exactly as before.
+- Otherwise, normalise `authors` into a list of allowed logins:
+  - a string → split on commas and trim whitespace around each name (`"calumjs, dependabot[bot]"`
+    → `["calumjs", "dependabot[bot]"]`);
+  - a JSON array → use its elements as-is (after trimming);
+  - drop any empty entries that result.
+- Keep an issue only if its `issue.author.login` matches an allowed login **case-insensitively**
+  (lower-case both sides before comparing, so `"CalumJS"` matches `"calumjs"`).
+- Issues whose author isn't in the allowlist are **excluded from this tick but left untouched** —
+  do **not** label them `armada:blocked` (they aren't broken; they're just out of scope for this
+  operator). They keep their `triggerLabel` so a different policy could pick them up later. You may
+  log them **at most once** per tick for visibility, e.g.
+  `crows-nest: 2 issue(s) skipped (author not in allowlist)` — don't comment on the issues
+  themselves and don't repeat the note every interval.
+
+This is a second gate on top of the trigger label: the label decides *which* issues are in play;
+`authors` decides *whose* issues the lookout will act on.
 
 ### 2b. Pick the next issue
 
