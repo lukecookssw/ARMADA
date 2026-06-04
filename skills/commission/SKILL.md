@@ -64,6 +64,7 @@ overwriting** — the user may have hand-tuned it.
   "triggerLabel": "armada",        // crows-nest only acts on issues with this label
   "dispatch": "shipwright",        // "shipwright" (one build pass) or "flagship" (auto loop)
   "baseBranch": "<detected default>",
+  "authors": "",                   // "" = act on anyone; "alice" or "alice,bob" to restrict by author
   "commands": {
     "build":  "<detected or omitted>",
     "test":   "<detected or omitted>",
@@ -74,8 +75,13 @@ overwriting** — the user may have hand-tuned it.
 }
 ```
 
+Write `authors` as `""` by default so the fresh repo acts on issues from anyone (no behaviour
+change). It's an optional allowlist — leave it blank, set a single username (`"calumjs"`), or a
+comma-separated list (`"calumjs, dependabot[bot]"`) to restrict which issue authors crows-nest will
+pick up (matched case-insensitively; see crows-nest §2a).
+
 Add `.armada/` is fine to commit (it's project config, not secrets). Mention that the user can edit
-`triggerLabel`/`dispatch` later.
+`triggerLabel`/`dispatch`/`authors` later.
 
 ## 4. Create the GitHub labels
 
@@ -101,6 +107,7 @@ and don't arm the loop for them** (both are the user's call):
 ⚓ ARMADA commissioned in <owner/repo>.
   base branch : <base>
   build/test  : <commands, or "none detected — skills will infer">
+  authors     : <"" = anyone, or the configured allowlist>
   labels      : armada, armada:underway, armada:done, armada:blocked ✓
 
 Next:
