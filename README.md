@@ -46,7 +46,7 @@ whatever repo you want the fleet to work on:
 
 Installing makes the *skills* available. **`commission`** is what makes them work in a given repo:
 it auto-detects your build/test/lint/run commands and base branch, writes `.armada/config.json`,
-creates the four GitHub labels, and tells you how to arm the watch. You don't hand-configure
+creates the ARMADA labels, and tells you how to arm the watch. You don't hand-configure
 anything — that knowledge lives in the skill, so any install self-sets-up.
 
 > Prefer not to use the plugin system? Drop the `skills/` folders into your project's
@@ -68,12 +68,18 @@ you grant autonomy one issue at a time.
 
 ```jsonc
 {
-  // The label crows-nest watches for. Issues without it are ignored.
+  // The label crows-nest watches for, on both issues and PRs. Objects without it are ignored.
   "triggerLabel": "armada",
   // How crows-nest dispatches a claimed issue: "shipwright" (single pass) or "flagship" (auto loop).
   "dispatch": "shipwright",
   // Default base branch for new work.
   "baseBranch": "main",
+  // May the ready-PR pipeline perform the final merge? Default false (stop-before-merge). See Safety.
+  "autoMerge": false,
+  // Merge method when autoMerge is true: "merge" | "squash" | "rebase".
+  "mergeMethod": "squash",
+  // Bound on the address↔review loop before crows-nest hands a PR back to a human.
+  "maxReviewRounds": 2,
   // Your project's commands. Any can be omitted; skills will infer or ask.
   "commands": {
     "build":  "npm run build",
@@ -87,9 +93,31 @@ you grant autonomy one issue at a time.
 
 ## Safety
 
-The fleet **opens PRs and pushes commits but never merges** — the final merge is always a human
-action. `crows-nest` only ever acts on issues carrying the configured trigger label, so it can't
-run away with your whole backlog.
+**Label discipline is the master switch.** `crows-nest` only ever acts on issues *and* PRs carrying
+the configured trigger label (`armada`). You arm autonomy by adding the label and disarm it by
+removing it — per object, no code change needed — so the fleet can't run away with your whole
+backlog.
+
+**By default the fleet opens PRs and pushes commits but never merges** — the final merge stays a
+human action. The ready-PR review pipeline (`muster` review → `shipwright` address → re-validate)
+runs to completion and then **stops at "ready to merge, awaiting human"**.
+
+**Gated auto-merge is opt-in.** Setting `autoMerge: true` in `.armada/config.json` lets the pipeline
+perform the merge itself — a deliberate reversal of the never-merges rail, so it is fenced on every
+side. `commission` always writes `autoMerge: false`; turning it on is a hand edit you make
+knowingly. Even with it on, `crows-nest` will **never** merge when any of these holds:
+
+- CI is **red or pending** (only a green check rollup merges);
+- there's an **unresolved blocking review finding** from `muster`;
+- the PR is a **draft** or GitHub reports it **not `mergeable`**;
+- the repo's **branch protections / required reviews aren't satisfied** (GitHub is the source of
+  truth — a refused merge is a block, not a retry);
+- the **address↔review loop didn't converge** within `maxReviewRounds` (default 2).
+
+When a merge is gated off for any of these, the PR is labelled `armada:blocked`, commented with the
+reason, and handed back — it is never left half-driven. The merge, when it happens, uses your
+configured `mergeMethod` (`merge`/`squash`/`rebase`). To disarm a PR mid-flight, just remove its
+`armada` label.
 
 ---
 🤖 Built with [Claude Code](https://claude.com/claude-code)

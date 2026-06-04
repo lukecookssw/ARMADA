@@ -61,9 +61,12 @@ overwriting** — the user may have hand-tuned it.
 
 ```jsonc
 {
-  "triggerLabel": "armada",        // crows-nest only acts on issues with this label
+  "triggerLabel": "armada",        // crows-nest only acts on issues/PRs with this label
   "dispatch": "shipwright",        // "shipwright" (one build pass) or "flagship" (auto loop)
   "baseBranch": "<detected default>",
+  "autoMerge": false,              // ready-PR pipeline may merge? Default false: stop-before-merge.
+  "mergeMethod": "squash",         // merge | squash | rebase, when autoMerge is true
+  "maxReviewRounds": 2,            // bound on the address↔review loop before handing back
   "commands": {
     "build":  "<detected or omitted>",
     "test":   "<detected or omitted>",
@@ -75,22 +78,33 @@ overwriting** — the user may have hand-tuned it.
 ```
 
 Add `.armada/` is fine to commit (it's project config, not secrets). Mention that the user can edit
-`triggerLabel`/`dispatch` later.
+`triggerLabel`/`dispatch` later. **Write `autoMerge: false`** — never commission a repo with
+auto-merge on; opting into autonomous merging is a deliberate, explicit choice the user makes later
+by hand (see the README Safety section). `mergeMethod`/`maxReviewRounds` only take effect once the
+user turns `autoMerge` on.
 
 ## 4. Create the GitHub labels
 
-The fleet tracks issue state entirely through labels, so they must exist. `--force` makes this
-idempotent (creates or updates, never errors on re-run). Use the configured `triggerLabel`:
+The fleet tracks state entirely through labels, so they must exist. There are two tracks — issues
+moving through the **build** and PRs moving through the **review→merge** pipeline. `--force` makes
+this idempotent (creates or updates, never errors on re-run). Use the configured `triggerLabel`:
 
 ```bash
-gh label create "armada"           --color "1d76db" --description "Eligible for the ARMADA fleet to pick up"     --force
-gh label create "armada:underway"  --color "fbca04" --description "Claimed by crows-nest; a build is in progress" --force
-gh label create "armada:done"      --color "0e8a16" --description "ARMADA opened a PR for this issue"            --force
-gh label create "armada:blocked"   --color "b60205" --description "ARMADA could not finish; needs a human"       --force
+# Shared arming switch (issues and PRs):
+gh label create "armada"           --color "1d76db" --description "Eligible for the ARMADA fleet to pick up"             --force
+# Issue track (the new-issue watch):
+gh label create "armada:underway"  --color "fbca04" --description "Claimed by crows-nest; a build is in progress"       --force
+gh label create "armada:done"      --color "0e8a16" --description "ARMADA opened a PR for this issue"                   --force
+# PR track (the ready-PR review→merge pipeline):
+gh label create "armada:reviewing" --color "fbca04" --description "Claimed by crows-nest; review→merge pipeline running" --force
+gh label create "armada:merged"    --color "5319e7" --description "ARMADA merged this PR (auto-merge was enabled)"       --force
+# Shared terminal failure state (issues and PRs):
+gh label create "armada:blocked"   --color "b60205" --description "ARMADA could not finish; needs a human"              --force
 ```
 
-(If `triggerLabel` was customised, name the eligible label to match and adjust the state labels'
-prefix accordingly.)
+`armada:reviewing` and `armada:merged` are the PR-pipeline labels; `armada:blocked` is reused as the
+shared "needs a human" terminal state across both tracks. (If `triggerLabel` was customised, name
+the eligible label to match and adjust the state labels' prefix accordingly.)
 
 ## 5. Report readiness and how to set sail
 
@@ -101,7 +115,8 @@ and don't arm the loop for them** (both are the user's call):
 ⚓ ARMADA commissioned in <owner/repo>.
   base branch : <base>
   build/test  : <commands, or "none detected — skills will infer">
-  labels      : armada, armada:underway, armada:done, armada:blocked ✓
+  auto-merge  : off (default) — ready-PR pipeline stops at "awaiting human merge"
+  labels      : armada, armada:underway, armada:done, armada:reviewing, armada:merged, armada:blocked ✓
 
 Next:
   1. Label the issues you want built with `armada`:
@@ -113,8 +128,10 @@ Next:
 ## Idempotency & re-runs
 
 - Labels: `--force` reconciles them — safe.
-- Config: diff-and-confirm before overwrite — never clobbers hand edits silently.
-- Nothing here creates issues, opens PRs, or merges. Commissioning only prepares the repo.
+- Config: diff-and-confirm before overwrite — never clobbers hand edits silently. Re-running never
+  flips `autoMerge` back on or off behind the user's back; if it's already set, leave it.
+- Nothing here creates issues, opens PRs, or merges. Commissioning only prepares the repo, and it
+  always writes `autoMerge: false` — autonomous merging is never turned on by commissioning.
 
 ## Inputs
 
@@ -122,6 +139,6 @@ Next:
 
 ## Output
 
-- `.armada/config.json` written (or confirmed up-to-date).
-- The four GitHub labels created/reconciled.
+- `.armada/config.json` written (or confirmed up-to-date), with `autoMerge: false`.
+- The six GitHub labels created/reconciled (issue track + PR track + shared blocked).
 - A readiness summary + the two next-step commands.
