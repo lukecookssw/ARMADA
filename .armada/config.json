@@ -2,6 +2,7 @@
   "triggerLabel": "armada",
   "dispatch": "shipwright",
   "baseBranch": "master",
+  "authors": "",
   "commands": {
     "test": "node scripts/validate-skills.mjs",
     "lint": "node scripts/validate-skills.mjs"

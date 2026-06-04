@@ -74,6 +74,12 @@ you grant autonomy one issue at a time.
   "dispatch": "shipwright",
   // Default base branch for new work.
   "baseBranch": "main",
+  // Optional author allowlist — whose issues the lookout will act on (matched case-insensitively).
+  //   "" (blank/omitted) → anyone (default)
+  //   "calumjs"          → only that author
+  //   "calumjs, bob"     → any author in the comma-separated list
+  // A JSON array (["alice","bob"]) is also accepted; the string form above is the primary one.
+  "authors": "",
   // Your project's commands. Any can be omitted; skills will infer or ask.
   "commands": {
     "build":  "npm run build",
