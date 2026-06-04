@@ -98,15 +98,64 @@ gh issue comment <number> --body "🔭 crows-nest: picked up by ARMADA — dispa
 
 ### 2d. Dispatch it
 
-Hand the claimed issue to the dispatch target:
+Hand the claimed issue to the dispatch target. **How** you dispatch depends on whether the tick is
+running autonomously or under a watching human — the two modes trade approval gates for context
+isolation:
 
-- **`shipwright`** (default) — run the [`shipwright`](../shipwright/SKILL.md) skill for issue
-  `#<number>` end-to-end: worktree → implement → validate → open PR. One build pass.
-- **`flagship`** — hand off to the autonomous drive-to-merge loop (when that ship is in the fleet).
+- **Autonomous (`/loop`) path — dispatch into a subagent.** When the tick is firing under `/loop`,
+  the lookout commands and a subagent works. Spawn the dispatch target (`shipwright`, default — or
+  `flagship` when that ship is in the fleet) via the **`Agent` tool**, non-interactive, with
+  `isolation: "worktree"`. The subagent runs the full build (worktree → implement → validate → open
+  PR) in **its own context and its own worktree**, then returns a structured result (below); the
+  lookout never carries the build transcript. This keeps the lookout cheap and legible across
+  hundreds of ticks, and it's the multi-agent shape ARMADA is named for.
 
-On a successful PR, swap the label to `armada:done` and comment the PR link on the issue. If the
-dispatched build fails or stalls, label `armada:blocked`, comment why, and move on — never leave an
-issue stuck on `armada:underway`, or it'll be invisible to both the lookout and a human.
+- **Supervised single pick — run inline.** When a human asked for one named issue ("crows-nest,
+  grab #142"), run [`shipwright`](../shipwright/SKILL.md) **inline in this turn** so the user keeps
+  its approval gates — the plan sign-off (§3 of shipwright) and the base-branch choice (§1a). No
+  subagent, because a subagent can't pause to ask.
+
+**The subagent runs `shipwright` non-interactively.** It cannot pause to ask the user, so
+shipwright's approval gates collapse to **sensible defaults** (accept the plan, take the default
+base branch) rather than prompts. Two guards survive non-interactively and must **not** be
+defaulted away:
+- **Base branch** — use `baseBranch` from `.armada/config.json` (§1a's logic still applies if the
+  issue's target code lives only on a feature branch; pick the safe base, don't merge to resolve it).
+- **No destructive migrations** — never run a data-destructive schema/data migration unattended;
+  if the only path forward needs one, return `blocked` rather than guessing.
+
+#### Subagent return contract
+
+The subagent reports back a single structured result the lookout maps to labels:
+
+```json
+{
+  "issue":  142,
+  "pr":     "https://github.com/<org>/<repo>/pull/150",
+  "branch": "142-add-csv-export",
+  "status": "opened",            // "opened" | "blocked"
+  "reason": "one-line summary or, when blocked, why a human is needed"
+}
+```
+
+The lookout maps that result to the claimed-state labels and the issue comment:
+
+- `status: "opened"` → `gh issue edit <issue> --add-label "armada:done" --remove-label "armada:underway"`,
+  then `gh issue comment <issue> --body "🔭 crows-nest: PR opened — <pr>"`.
+- `status: "blocked"` → `gh issue edit <issue> --add-label "armada:blocked" --remove-label "armada:underway"`,
+  then `gh issue comment <issue> --body "🔭 crows-nest: blocked — <reason>"`.
+
+Either way the issue leaves `armada:underway`: never leave one stuck there, or it's invisible to
+both the lookout and a human. (On the inline path the running shipwright opens the PR directly;
+apply the same label swap and comment from its outcome.)
+
+#### Concurrency stays opt-in
+
+Worktree isolation is what makes the autonomous path safe to parallelise: because each subagent
+builds in **its own worktree**, multiple issues could be dispatched in the same tick without
+trampling a shared tree. That's the enabler, **not** the default — the one-issue-per-tick rule of
+§2b is unchanged. Only raise the per-tick limit (one subagent per issue) when the user explicitly
+asks for concurrency.
 
 ### 2e. Report the tick
 
