@@ -1,0 +1,15 @@
+{
+  "name": "armada",
+  "owner": {
+    "name": "calumjs",
+    "email": "calumjs@live.com"
+  },
+  "description": "ARMADA — a fleet of Claude Code skills that watch GitHub issues and drive them to merge-ready PRs.",
+  "plugins": [
+    {
+      "name": "armada",
+      "source": "./",
+      "description": "Autonomous Recursive Multi-Agent Development Assembler. Install, then run /armada:commission to self-set-up in any repo. Skills: commission, crows-nest, shipwright (more on the way)."
+    }
+  ]
+}

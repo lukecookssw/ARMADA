@@ -1,0 +1,10 @@
+{
+  "triggerLabel": "armada",
+  "dispatch": "shipwright",
+  "baseBranch": "master",
+  "commands": {
+    "test": "node scripts/validate-skills.mjs",
+    "lint": "node scripts/validate-skills.mjs"
+  },
+  "notes": "ARMADA builds itself. This repo has no compile step — a 'feature' here is a new or updated skill. The validate step checks every skills/*/SKILL.md has well-formed frontmatter (a `name` matching its directory and a non-empty `description`)."
+}

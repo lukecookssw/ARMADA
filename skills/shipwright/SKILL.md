@@ -19,7 +19,9 @@ opening a pull request. `shipwright` is stack-agnostic: it discovers the project
 ## 0. Discover the project's commands
 
 Read `.armada/config.json` → `commands` for `build` / `test` / `lint` / `format` / `run` and
-`baseBranch`. If absent, infer from the repo and **state your inference before relying on it**:
+`baseBranch`. If the file is absent the repo isn't commissioned — run
+[`commission`](../commission/SKILL.md) first (it detects and writes these). If you're mid-flight
+without it, infer from the repo and **state your inference before relying on it**:
 
 - `package.json` → `scripts` (`build`, `test`, `lint`)
 - `Makefile` → targets (`make build`, `make test`)

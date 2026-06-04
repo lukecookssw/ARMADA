@@ -18,6 +18,7 @@ the right skill from natural language — you rarely type the name.
 
 | Skill | Role | Status |
 | :--- | :--- | :--- |
+| **`commission`** | The bootstrap. Sets ARMADA up in a repo: detects build/test commands, writes `.armada/config.json`, creates the GitHub labels. Idempotent. | ✅ shipped |
 | **`crows-nest`** | The lookout. Runs under `/loop` and watches for new GitHub issues, then dispatches each one into the fleet. | ✅ shipped |
 | **`shipwright`** | The builder. Takes one issue and works it end-to-end in an isolated worktree, opening a PR. | ✅ shipped |
 | `flagship` | The command vessel. An autonomous build → review → verify → fix loop that drives an issue all the way to merge-ready. | 🚧 roadmap |
@@ -30,21 +31,38 @@ the right skill from natural language — you rarely type the name.
 We're adding ships as we need them, not all at once. `crows-nest` + `shipwright` already form a
 working loop: an issue appears → it gets built → a PR opens.
 
-## Install
+## Install & set up
 
-ARMADA is a Claude Code plugin. Clone it and point Claude Code at it:
+ARMADA is a Claude Code plugin. Add it as a marketplace and install it, then **commission** it in
+whatever repo you want the fleet to work on:
 
-```bash
-git clone https://github.com/calumjs/ARMADA.git
+```text
+/plugin marketplace add calumjs/ARMADA      # or a local path: /plugin marketplace add ./
+/plugin install armada@armada
+/armada:commission                          # one-time, idempotent, per repo
 ```
 
-Then add it as a plugin marketplace / local plugin (see the Claude Code plugin docs), or drop
-the `skills/` directories into your project's `.claude/skills/`.
+Installing makes the *skills* available. **`commission`** is what makes them work in a given repo:
+it auto-detects your build/test/lint/run commands and base branch, writes `.armada/config.json`,
+creates the four GitHub labels, and tells you how to arm the watch. You don't hand-configure
+anything — that knowledge lives in the skill, so any install self-sets-up.
+
+> Prefer not to use the plugin system? Drop the `skills/` folders into your project's
+> `.claude/skills/` and run `/commission` — same result, project-scoped.
+
+### Then set sail
+
+```text
+1. Label the issues you want built:   gh issue edit <n> --add-label armada
+2. Arm the lookout:                   run crows-nest (it hands you the /loop line)
+```
+
+The `armada` label is the arming switch — `crows-nest` only ever touches issues that carry it, so
+you grant autonomy one issue at a time.
 
 ## Per-repo configuration
 
-ARMADA skills run *your* project's commands. Drop a `.armada/config.json` in the target repo so
-the fleet knows how to build, test, lint, and run it:
+`commission` writes `.armada/config.json` for you, but you can hand-edit it. Shape:
 
 ```jsonc
 {
@@ -52,22 +70,18 @@ the fleet knows how to build, test, lint, and run it:
   "triggerLabel": "armada",
   // How crows-nest dispatches a claimed issue: "shipwright" (single pass) or "flagship" (auto loop).
   "dispatch": "shipwright",
-  // Your project's commands. Any can be omitted; skills will try to infer them.
+  // Default base branch for new work.
+  "baseBranch": "main",
+  // Your project's commands. Any can be omitted; skills will infer or ask.
   "commands": {
     "build":  "npm run build",
     "test":   "npm test",
     "lint":   "npm run lint",
     "format": "npm run format",
     "run":    "npm run dev"
-  },
-  // Default base branch for new work.
-  "baseBranch": "main"
+  }
 }
 ```
-
-If `.armada/config.json` is absent, skills fall back to inferring commands from the repo
-(`package.json` scripts, a `Makefile`, `*.csproj`, `Cargo.toml`, etc.) and ask before guessing
-anything destructive.
 
 ## Safety
 

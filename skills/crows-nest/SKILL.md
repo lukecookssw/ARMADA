@@ -35,14 +35,17 @@ These are constraints the design is built around:
 
 ## 1. Resolve config and scope
 
-Read `.armada/config.json` from the target repo if present:
+Read `.armada/config.json` from the target repo:
 
 - `triggerLabel` — the label to watch (default `armada`).
 - `dispatch` — how to hand off a claimed issue: `"shipwright"` (one build pass, default) or
   `"flagship"` (autonomous drive-to-merge loop).
 - `baseBranch` — default base for new work.
 
-If the config is absent, default to label `armada`, dispatch `shipwright`, base `main`, and say so.
+**If the config or the labels are missing, the repo isn't commissioned** — run the
+[`commission`](../commission/SKILL.md) skill first (it detects commands, writes the config, and
+creates the labels), then continue. Don't fall back to silent defaults: an uncommissioned repo
+usually has no `armada` label, so the watch would find nothing and look broken.
 
 Confirm the watch parameters with the user **once** before arming the loop — label, dispatch
 target, interval, and the claimed-state convention below. This is the only human checkpoint, so
