@@ -8,3 +8,7 @@
 # cartographer — per-repo learned heuristics are local working state, not part of
 # the distributed plugin; keep ARMADA's own cartography out of the product repo.
 .armada/cartography/
+
+# foghorn — hash-cached spoken clips are machine-/content-specific scratch, keyed
+# by (text + voice + provider); regenerated on demand, never part of the plugin.
+.armada/foghorn/cache/
