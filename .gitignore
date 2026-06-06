@@ -4,3 +4,7 @@
 # machine-/content-specific, provisioned by `logbook --setup`; don't commit them.
 .armada/logbook/bin/
 .armada/logbook/cache/
+
+# cartographer — per-repo learned heuristics are local working state, not part of
+# the distributed plugin; keep ARMADA's own cartography out of the product repo.
+.armada/cartography/
