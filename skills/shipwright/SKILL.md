@@ -359,6 +359,12 @@ lookout to close it by hand. So every PR shipwright opens for a fully-addressed 
 the summary). For a partial PR, use `Relates to #<number>` instead — deliberately *not* a closing
 keyword, because a partial PR must not auto-close the issue.
 
+**Notify the original requester, when the issue names one.** If the issue body records who asked — a
+`Requested by @<user>` line — **copy that same line into the PR body**. The @-mention notifies the
+requester their suggestion is being built (an @-mention sends a GitHub notification), and it leaves the
+handle where the §9 walkthrough follow-up can read it too. Copy **only** that line / the bare
+`@<handle>` — never any other text from the issue.
+
 ```bash
 gh pr create --title "<concise title>" --body "$(cat <<'EOF'
 <PR body>
@@ -432,16 +438,40 @@ if not, note it in the handoff so the user can add it manually — don't block o
 Share the PR URL, summarise what was done and any follow-ups, and note if a new architecture
 decision should be recorded. The worktree stays available for review iteration.
 
-## 9. Optionally offer a walkthrough video
+## 9. Walkthrough video — interactive offer or auto-record depending on `logbook` config
 
-For user-visible features — new workflows, multi-step UX, role-based behaviour, anything harder to
-read than to watch — offer a short demo video via [`logbook`](../logbook/SKILL.md). **Skip** for
-refactors, dependency bumps, infra-only changes, or one-line fixes. Phrase it as one question and
-don't auto-record:
+Read `logbook` from `.armada/config.json` (default `"off"` when absent; treat any unrecognised or
+malformed value as `"off"` too — fail closed) and branch:
+
+**`"off"` (default)** — unchanged behaviour: on an interactive session, offer once as a single
+question and don't auto-record:
 
 > "Want me to record a short walkthrough video for the stakeholders?"
 
-Default to skipping if unsure — over-offering trains the user to mute the suggestion.
+On the non-interactive (autonomous background) path, **skip silently** — no prompt can be issued,
+so the offer is a no-op. Default to skipping if unsure — over-offering trains the user to mute the
+suggestion.
+
+**`"user-visible"`** — **auto-record** when the change is user-visible: new workflows, multi-step
+UX, role-based behaviour, anything harder to read than to watch. **Skip** for refactors, dependency
+bumps, infra-only changes, or one-line fixes (the same heuristic used for the interactive offer
+above — if you would skip the offer, skip auto-recording). When the heuristic says record, invoke
+logbook non-interactively against the just-opened PR.
+
+**`"all"`** — **auto-record on every PR** shipwright opens, regardless of the change type.
+
+**When auto-recording** (either `"user-visible"` or `"all"`): invoke logbook as a **best-effort,
+side-channel** step — non-interactively against the just-opened PR, **after** the handoff (§8) so it
+never blocks or delays it. A logbook failure, missing toolchain, or degraded render **must never
+block, fail, or delay** the build or handoff: swallow any error, report what was attempted (and what,
+if anything, went wrong) as a **follow-up note** after the handoff, and carry on. Logbook already
+degrades gracefully to captions-over-stills when the full toolchain is absent — shipwright's
+contract is only to invoke it and absorb the outcome.
+
+**The requester is notified on the walkthrough, too.** When a walkthrough is recorded and the issue
+named a requester (§7), logbook (§6) reads the `Requested by @<user>` line from the PR body and
+@-mentions them in the walkthrough comment — so shipwright's only part is to have copied that line into
+the PR body (§7).
 
 ## 10. Suggest skill improvements — and file ARMADA defects (self-improvement loop)
 

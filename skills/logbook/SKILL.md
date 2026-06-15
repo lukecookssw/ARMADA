@@ -240,8 +240,23 @@ gh release create "$TAG" --title "Walkthrough — PR #${PR}" --notes "Narrated w
   || gh release edit "$TAG" --title "Walkthrough — PR #${PR}"   # idempotent: reuse the per-PR tag on re-record
 gh release upload "$TAG" "<video file>" --clobber
 ASSET_URL=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name | endswith(".mp4")) | .url')
-gh pr comment "$PR" --body "🎬 Walkthrough video: ${ASSET_URL}"
+
+# If the PR body carries a "Requested by @<user>" line (shipwright §7 copies it from the issue when
+# someone requested the feature), @-mention them so they're notified there's a demo to watch. Extract
+# ONLY the handle with an anchored match, so no other text from the (untrusted) issue is carried in:
+REQUESTER=$(gh pr view "$PR" --json body --jq '.body' \
+  | grep -oiP '^Requested by @\K[A-Za-z0-9-]{1,39}' | head -n1)
+NOTE="🎬 Walkthrough video: ${ASSET_URL}"
+[ -n "$REQUESTER" ] && NOTE="${NOTE}
+
+cc @${REQUESTER} — here's the walkthrough of the feature you suggested."
+gh pr comment "$PR" --body "$NOTE"
 ```
+
+**Notify the requester, when the PR names one.** If the PR body carries a `Requested by @<user>` line
+(shipwright §7 copies it from the issue), @-mention that handle in the walkthrough comment so they're
+notified there's a demo to watch. Use **only** the bare `@<handle>` the anchored match extracts —
+never any other text from the (untrusted) issue body.
 
 The per-PR tag (`logbook-pr-<n>`) makes re-recording idempotent — a new take replaces the asset on
 the same release rather than littering tags. If release creation is denied by permissions, fall back
