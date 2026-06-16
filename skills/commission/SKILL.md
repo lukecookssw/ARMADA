@@ -94,7 +94,7 @@ overwriting** — the user may have hand-tuned it.
       "maxFindings": 20            // most candidate findings a run collects before it stops surveying
     }
   },
-  "logbook": "off",               // shipwright auto-record walkthrough on PR open? "off" | "user-visible" | "all". Default "off" (opt-in).
+  "logbook": "off",               // auto-record walkthrough? shipwright on PR open + crows-nest at merge/ship. "off" | "user-visible" | "all". Default "off" (opt-in).
   "publicIntake": {                // screen UNSOLICITED public issues (no trigger label) and charter the safe, good ones. The ONLY track that reads untrusted input.
     "enabled": false,              // master switch. Default false (opt-in) — the track is inert until on. Reads attacker-controllable text, so off by default.
     "authors": "",                 // optional allowlist of public authors to consider. "" = anyone (the point of the feature). Same form as top-level "authors".
@@ -203,6 +203,12 @@ bumps, infra-only changes, or one-line fixes — shipwright applies the same heu
 interactive §9 offer); set `"all"` to record on every PR shipwright opens. When auto-recording,
 shipwright invokes `logbook` non-interactively, best-effort and side-channel — a logbook failure,
 missing toolchain, or degraded render **never blocks, fails, or delays** the build or handoff.
+
+The **same key also drives [`crows-nest`](../crows-nest/SKILL.md)** (§8f): in the autonomous flow
+shipwright runs in a background subagent and *defers* the walkthrough, so crows-nest records it at the
+**PR-merged / issue-shipped reconcile** instead — idempotently (never double-records), verified before
+posting, with a bounded backfill for already-merged PRs, and fully side-channel. So `"user-visible"` /
+`"all"` covers both the open-time (shipwright) and merge-time (crows-nest) paths from one setting.
 
 `publicIntake` gates crows-nest's **public-intake track** (§2g) — the one track that reads
 **unsolicited issues from the general public** (those *without* the trigger label) instead of acting
