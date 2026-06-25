@@ -52,9 +52,9 @@ These are constraints the design is built around:
 1. **A skill cannot type `/loop` itself.** `/loop` is a built-in command and the Skill tool only
    runs skills — model text isn't executed as a command. So `crows-nest`'s job is to **compose the
    exact `/loop` line and hand it to you to run** (§6). Everything after that repeats automatically.
-2. **Only act on the trigger label.** The lookout must never grab the whole backlog. It acts solely
-   on open issues *and* PRs carrying the configured `triggerLabel` (default `armada`). No label →
-   not its job.
+2. **Build every open issue; gate PRs by label.** On this install the lookout builds open issues
+   that aren't already in an `armada:*` lifecycle state. PRs are still claimed only when they carry
+   the configured `triggerLabel` (default `armada`) — the fleet auto-arms its own PRs.
 3. **Claiming must be atomic-ish and visible.** Before dispatching, mark the unit claimed (a label
    swap/add + a comment) so a second tick — or a second human — doesn't pick up the same issue or
    PR. The claim labels (`armada:underway` / `armada:reviewing`) are the in-flight guard that makes
@@ -185,7 +185,10 @@ tracks** — one for issues moving through the build, one for PRs moving through
 
 **Issue track (the new-issue watch, §2):**
 
-- `armada` — eligible, not yet picked up.
+- *(no `armada:*` lifecycle label)* — eligible, not yet picked up. On this install **any** open
+  issue not already in an `armada:*` lifecycle state is eligible (§2a) — the `armada` trigger label
+  is **not** an issue-eligibility gate (it only gates the PR track). An issue may carry `armada` or
+  not; either way it's picked up. (The label is stripped on claim only if present — §2d.i.)
 - `armada:underway` — claimed; a tick is building it (or it has an open branch/PR).
 - `armada:done` — a PR has been opened (set by the dispatched skill / on handoff). **Not terminal**:
   the issue stays open until its PR merges and its acceptance criteria are confirmed.
@@ -243,7 +246,7 @@ one PR list per tick, each `--json`-projected so the whole scan is two round-tri
 per-item calls:
 
 ```bash
-gh issue list --label "<triggerLabel>" --state open \
+gh issue list --state open \
   --json number,title,labels,createdAt,assignees,author,body --limit 50
 gh pr list --label "<triggerLabel>" --state open \
   --json number,title,isDraft,labels,headRefName,baseRefName,files,body,mergeable,statusCheckRollup,updatedAt --limit 50
@@ -254,7 +257,7 @@ PR `files` (for same-file conflict detection) and `body` (for explicit dependenc
 graph is built **once** from this single scan, with no redundant round-trips per item.
 
 **Issue eligibility.** Filter **out** any issue that is already:
-- labelled `armada:underway`, `armada:done`, or `armada:blocked`, **or**
+- labelled `armada:underway`, `armada:done`, `armada:shipped`, or `armada:blocked`, **or**
 - has an open PR that references it (detectable from the PR `body` set already pulled above —
   no extra `gh pr list --search` round-trip needed), **or**
 - already has a worktree/branch named for it locally.
@@ -388,8 +391,9 @@ most once per sibling, in a planned order.
 - **base about to move** → "base #K merging first";
 - **over the bound** → "queued (N/​M builds|reviews in flight)".
 
-Held units keep their current labels (an undispatched issue stays on `<triggerLabel>`, an
-undispatched PR stays eligible) so a later tick re-evaluates them once the blocker clears. **A held
+Held units keep their current labels (an undispatched issue stays as-is — it gains no claim label
+until it's dispatched; an undispatched PR stays eligible) so a later tick re-evaluates them once the
+blocker clears. **A held
 unit is never lost and never silently skipped** — it's reported in §2e with its reason, and the loop
 picks it up next interval when its prerequisite has landed or a slot frees.
 
@@ -403,7 +407,10 @@ For each issue on the frontier (§2c), within the `maxConcurrentBuilds` budget:
 #### 2d.i Claim it
 
 ```bash
-gh issue edit <number> --add-label "armada:underway" --remove-label "<triggerLabel>"
+gh issue edit <number> --add-label "armada:underway"
+# The trigger label is no longer required to enter the build queue; strip it only if present
+# (a manually-opened issue won't carry it, so ignore the error when it isn't there).
+gh issue edit <number> --remove-label "<triggerLabel>" 2>/dev/null || true
 gh issue comment <number> --body "🔭 crows-nest: picked up by ARMADA — dispatching to <dispatch target>."
 ```
 
@@ -532,7 +539,7 @@ the two run concurrently without either starving the other:
 
 - `maxConcurrentBuilds` (config, **default 1**) caps background **builds** (issue track): a tick
   dispatches up to `(maxConcurrentBuilds − builds-in-flight)` frontier issues and **holds the rest**
-  for later ticks (they keep their claim state — an undispatched issue stays on `<triggerLabel>`,
+  for later ticks (they keep their state — an undispatched issue gains no claim label,
   only a dispatched one moves to `armada:underway`).
 - `maxConcurrentReviews` (config, **default 1**) caps background **review→merge pipelines** (PR
   track): a tick launches up to `(maxConcurrentReviews − reviews-in-flight)` frontier PRs (§3) and
@@ -715,14 +722,14 @@ stages and a single terminal result. It implements the **parallel-reviewers + de
 [`muster`](../muster/SKILL.md) specifies — but because this pipeline is itself dispatched as a
 **subagent** (and a subagent can't spawn nested agents), the **pipeline launches muster's two lenses
 as two *top-level* agents** and consolidates them, rather than dispatching one `muster` subagent that
-tries (and fails) to fan out into a single-lens/degraded review ([#76](https://github.com/calumjs/ARMADA/issues/76)).
+tries (and fails) to fan out into a single-lens review ([#76](https://github.com/calumjs/ARMADA/issues/76)).
 
 **This Workflow is bundled as a script, not prose the model re-derives each tick** — that's what
 makes it deterministic and keeps only its *output* in the lookout's context:
 
 - **`${CLAUDE_PLUGIN_ROOT}/scripts/review-merge-pipeline.mjs`** fans out the **two review lenses**
-  (`code-review` + `codex:codex-rescue`) as top-level agents and `shipwright` via `agent()` with
-  **structured-output schemas**, consolidates the lenses (naming any degrade), runs the bounded
+  (`code-review` + `second-opinion`) as top-level agents and `shipwright` via `agent()` with
+  **structured-output schemas**, consolidates the lenses, runs the bounded
   address↔review loop, make-mergeable, and the gated merge.
 - **`${CLAUDE_PLUGIN_ROOT}/scripts/merge-gate.mjs`** computes the merge decision (`merge` |
   `ready_awaiting_human` | `blocked`) **from the run-state JSON** — the model acts on its output and

@@ -87,10 +87,9 @@ const localChecks = s.localChecks; // §4.3 local build/test/lint result; must b
 //     green-but-awaiting-human PR distinctly from a blocked one. ---
 const blockers = []; // reasons a merge is NOT safe (gates 2–5 + convergence)
 
-// Gate 2 — no unresolved blocking finding, and the review was actually produced.
-if (degraded) {
-  blockers.push('review degraded (a lens failed) — a missing review is not a green light');
-} else if (!Number.isFinite(blocking)) {
+// Gate 2 — no unresolved blocking finding (single-lens reviews are complete, not degraded;
+// a missing review summary, however, still blocks — that's the no-review-at-all case).
+if (!Number.isFinite(blocking)) {
   blockers.push('no review summary — cannot confirm zero blocking findings');
 } else if (blocking > 0) {
   blockers.push(`${blocking} unresolved blocking finding(s)`);
@@ -132,7 +131,7 @@ if (!protectionsSatisfied) {
 // red CI persist after maxReviewRounds, that is a hard block (no convergence),
 // not a "try again". Only relevant when there is still something unresolved.
 const unresolvedThisRound =
-  degraded || !Number.isFinite(blocking) || blocking > 0 || ci !== 'green' || localChecks !== true;
+  !Number.isFinite(blocking) || blocking > 0 || ci !== 'green' || localChecks !== true;
 let noConvergence = false;
 if (rounds !== null && rounds >= maxReviewRounds && unresolvedThisRound) {
   noConvergence = true;

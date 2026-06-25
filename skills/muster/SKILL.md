@@ -2,7 +2,7 @@
 name: muster
 description: >
   The ARMADA inspection before sailing. Reviews an open pull request through two independent
-  lenses in parallel — a conventions/correctness code-review pass and a codex-rescue
+  lenses in parallel — a conventions/correctness code-review pass and an independent
   root-cause second opinion — consolidates and dedupes the findings, posts them as inline PR
   review comments plus a top-level summary, and returns the findings as structured data for the
   fleet to act on. Trigger when the user says "muster", "review this PR", "inspect the diff",
@@ -24,7 +24,7 @@ plus a summary, and hands the fleet back a structured list of findings it can ga
 > **return structured findings.**
 
 Two lenses catch more than one: a single reviewer anchors on the first thing it sees. The
-code-review lens reads the diff against the project's conventions; the codex-rescue lens comes at
+code-review lens reads the diff against the project's conventions; the second-opinion lens comes at
 the same diff cold, from a root-cause/second-opinion angle. Disagreement between them is signal —
 surface it rather than averaging it away.
 
@@ -57,11 +57,11 @@ return an empty finding set rather than spawning reviewers on nothing.
 > spawns the two lenses as below. But inside [`crows-nest`](../crows-nest/SKILL.md)'s ready-PR
 > pipeline, **the pipeline is already running as a subagent**, and a subagent **cannot spawn nested
 > agents**. A muster subagent that tried to fan out there would fail to nest and silently collapse to
-> a **single, degraded lens** — exactly the defect [#76](https://github.com/calumjs/ARMADA/issues/76)
+> a **single lens** — exactly the defect [#76](https://github.com/calumjs/ARMADA/issues/76)
 > fixes. So in the pipeline the **two lenses are launched as two *top-level* agents by the Workflow**
 > (`scripts/review-merge-pipeline.mjs` §4.1, via `consolidateLenses`), and muster is reused only to
 > **post the already-consolidated verdict** (§3). Either way the contract is the same — two
-> independent lenses, consolidated (§2), with any degrade **named** (§5), never a silent single lens.
+> independent lenses whenever they can run, consolidated (§2), never a silent collapse to one.
 
 Spawn **both** reviewers via the **`Agent` tool**, non-interactive, in the **same turn** so they
 run concurrently. Each gets the PR metadata, the diff, the changed-file list, and the project's
@@ -71,9 +71,9 @@ lookout's transcript.
 
 If the **`Agent` tool isn't available at all** (muster is itself running as a subagent — no nested
 agents), muster **cannot fan out**: it runs the **single lens it can** (the in-context `/code-review`
-pass) and returns `degraded: true` with the missing lens **named** in `degradedReason` and the
-summary. It must **never** present a single-lens read as a full two-lens review. In the pipeline this
-case doesn't arise, because the Workflow owns the top-level fan-out (see the callout above).
+pass) and returns those findings as a **complete review**. A single-lens review is treated as a
+valid, complete review — not a degraded one. In the pipeline this case doesn't arise, because the
+Workflow owns the top-level fan-out (see the callout above).
 
 - **Lens A — code-review (conventions + correctness).** Dispatch the built-in `/code-review` skill
   (or, if it isn't available, an `Explore` / `general-purpose` subagent running a
@@ -81,15 +81,15 @@ case doesn't arise, because the Workflow owns the top-level fan-out (see the cal
   idioms, is it correct, does it handle errors and edge cases, does it keep to the issue's scope?
   This lens knows the repo's conventions. If neither the `/code-review` skill nor a suitable
   general-purpose subagent is available in the environment, note that in the summary and run with
-  the single lens rather than failing the whole muster — a one-lens review is degraded, not useless,
-  and no review is never a green light.
+  the single lens rather than failing the whole muster — a one-lens review is complete, not useless,
+  and no review at all is never a green light.
 
-- **Lens B — codex-rescue (independent second opinion).** Dispatch with
-  `agentType: codex:codex-rescue` for a root-cause / second-opinion read of the same diff — an
-  external reviewer that hasn't absorbed this repo's habits and so catches what the conventions
-  lens rationalises away. If the `codex:codex-rescue` agent type isn't available in the
-  environment, note that in the summary and run with the single lens rather than failing the whole
-  muster — a one-lens review is degraded, not useless.
+- **Lens B — second-opinion (independent second opinion).** Dispatch a second `general-purpose`
+  agent for a root-cause / second-opinion read of the same diff — coming at it cold so it catches
+  what the conventions lens rationalises away. It reads the diff directly and does **not** run
+  `/code-review` (that's Lens A). If a second agent can't be dispatched in the environment, note
+  that in the summary and run with the single lens rather than failing the whole muster — a
+  one-lens review is complete, not useless.
 
 ### Per-finding schema (both lenses return this)
 
@@ -140,7 +140,7 @@ and a human can act on.
 
   <detail>
 
-  <em>flagged by: code-review + codex-rescue</em>" \
+  <em>flagged by: code-review + second-opinion</em>" \
     -f commit_id="<head sha>" \
     -f path="<file>" \
     -F line=<line> \
@@ -169,10 +169,10 @@ array — same schema as §1 — plus a small header so a gate can be computed w
 {
   "pr": 150,
   "summary": { "blocking": 1, "major": 2, "minor": 3, "nit": 1 },
-  "lenses": ["code-review", "codex-rescue"],
+  "lenses": ["code-review", "second-opinion"],
   "findings": [
     { "severity": "blocking", "file": "src/api/export.ts", "line": 128,
-      "title": "CSV export unescaped on quotes", "detail": "…", "lenses": ["code-review","codex-rescue"] }
+      "title": "CSV export unescaped on quotes", "detail": "…", "lenses": ["code-review","second-opinion"] }
   ]
 }
 ```
@@ -183,15 +183,12 @@ review was posted at all. Keep the return machine-readable; the prose lives on t
 ## 5. When something goes wrong
 
 - **One lens fails** (agent type missing, subagent errors, or muster is itself a subagent and can't
-  fan out — §1) — proceed with the lens that returned, mark the review **degraded** in the summary,
-  and say so in the return (`"degraded": true`, `"lenses": ["code-review"]`). **Name the degrade
-  explicitly** — the top-level summary comment must state *which* lens didn't run and *why* (e.g.
-  "single-lens/degraded — codex-rescue lens unavailable (no nested agents)"), never a silent
-  collapse to one lens. Don't fail the whole muster for a half-loaf; a named, degraded review is
-  still worth posting — but it is a degraded review, not a green light.
-- **Both lenses fail** — post nothing, return an empty `findings` with a `"degraded": true` flag and
-  a reason. The caller treats "no review produced" as **not** a green light (it must not infer
-  "no findings ⇒ safe to merge").
+  fan out — §1) — proceed with the lens that returned and post it as a **complete review**
+  (`"lenses": ["code-review"]`). A single-lens review is valid, not degraded — don't fail the whole
+  muster for it, and don't flag it as a lesser review.
+- **Both lenses fail** — post nothing and return an empty `findings` set with a reason. The caller
+  treats "no review produced" as **not** a green light (it must not infer "no findings ⇒ safe to
+  merge"). This is the *no-review-at-all* case, distinct from a valid single-lens review.
 - **`gh api` comment posting is rejected** (permissions / branch rules) — fall back to a single
   top-level summary comment listing every finding inline, and note the inline-posting failure. Never
   drop findings on the floor because the inline endpoint refused.
@@ -211,4 +208,5 @@ review was posted at all. Keep the return machine-readable; the prose lives on t
 
 - Inline PR review comments (one per located finding) + a top-level summary comment.
 - A structured finding set returned to the caller for the merge gate.
-- A degraded-review signal when one or both lenses couldn't run — never a false green light.
+- When **no** review could be produced (both lenses failed), an explicit "no review" signal — never
+  a false green light. A single-lens review is reported as a complete review.

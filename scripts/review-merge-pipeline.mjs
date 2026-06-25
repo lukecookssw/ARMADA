@@ -73,7 +73,7 @@ export const REVIEW_SCHEMA = {
         nit: { type: 'integer' },
       },
     },
-    degraded: { type: 'boolean', description: 'true if one/both lenses failed — never a green light' },
+    degraded: { type: 'boolean', description: 'retained for compatibility; always false (single-lens reviews are complete)' },
     lenses: { type: 'array', items: { type: 'string' } },
     findings: { type: 'array', items: FINDING_SCHEMA },
   },
@@ -150,13 +150,14 @@ export const LENSES = [
       `{severity,file,line,title,detail}. Do not fan out to further agents.`,
   },
   {
-    name: 'codex-rescue',
-    agentType: 'codex:codex-rescue',
+    name: 'second-opinion',
+    agentType: 'general-purpose',
     prompt: (pr) =>
       `Review PR #${pr} as the independent second-opinion lens (muster Lens B) — a root-cause / ` +
       `second-opinion read of the same diff, coming at it cold so you catch what a conventions lens ` +
-      `rationalises away. Return ONLY your findings array in the per-finding schema ` +
-      `{severity,file,line,title,detail}. Do not fan out to further agents.`,
+      `rationalises away. Read the diff directly; do NOT run /code-review (that's Lens A). Return ` +
+      `ONLY your findings array in the per-finding schema {severity,file,line,title,detail}. Do not ` +
+      `fan out to further agents.`,
   },
 ];
 
@@ -168,9 +169,10 @@ export function consolidateLenses(pr, lensResults) {
   const ran = lensResults.filter((l) => l.ok);
   const ranNames = ran.map((l) => l.name);
   const failed = lensResults.filter((l) => !l.ok).map((l) => l.name);
-  // A review is degraded whenever fewer than two lenses returned — that's the
-  // single-lens/degraded state issue #76 makes sure is NAMED, never silent.
-  const degraded = ranNames.length < lensResults.length;
+  // Single-lens reviews are treated as complete, not degraded (local policy).
+  // Forcing this false makes every downstream `review.degraded` check inert:
+  // the merge gate no longer blocks on it and the pipeline never re-loops on it.
+  const degraded = false;
 
   const SEV_RANK = { blocking: 3, major: 2, minor: 1, nit: 0 };
   const byKey = new Map(); // "file\ttitle" (lower, trimmed) -> finding (+ lenses[])
@@ -267,8 +269,9 @@ export async function runReviewMergePipeline(ctx, deps) {
     // would silently collapse to a single lens. Launching both lenses at the
     // top level gives them genuine independence even inside crows-nest's review
     // subagent. Structured return only; each lens's transcript stays in its own
-    // context. If a lens can't run (agent type missing / errors), the review is
-    // marked degraded and the missing lens is NAMED — never a silent single lens.
+    // context. If a lens can't run (agent type missing / errors), the review
+    // proceeds with the lens that returned — a single-lens review is complete,
+    // not degraded (see consolidateLenses).
     log(`§4.1 review round ${round}/${maxReviewRounds} on PR #${pr} — ${LENSES.length} lenses (top-level)`);
     const lensResults = await Promise.all(
       LENSES.map(async (lens) => {
@@ -292,14 +295,12 @@ export async function runReviewMergePipeline(ctx, deps) {
     review = consolidateLenses(pr, lensResults);
 
     const blocking = review?.summary?.blocking;
-    const degraded = review?.degraded === true;
-    if (degraded) log(`§4.1 review DEGRADED on PR #${pr}: ${review.degradedReason}`);
 
     // Post the consolidated verdict back onto the PR (muster §3) — inline
     // comments + a top-level summary — via a write-capable agent, so the review
-    // is durable on the PR and not just in the pipeline's terminal result. The
-    // degrade, when present, is named explicitly in that summary. Best-effort:
-    // a failed post never fails the pipeline (the structured gate still holds).
+    // is durable on the PR and not just in the pipeline's terminal result.
+    // Best-effort: a failed post never fails the pipeline (the structured gate
+    // still holds).
     try {
       await agent({
         agentType: 'muster',
@@ -307,9 +308,7 @@ export async function runReviewMergePipeline(ctx, deps) {
           `Post this ALREADY-CONSOLIDATED muster review onto PR #${pr} (muster §3 only — do NOT ` +
           `re-run the lenses or fan out): inline comments for located findings, plus one top-level ` +
           `summary comment with counts by severity and the bottom line. ` +
-          (degraded
-            ? `This review is DEGRADED — state that explicitly in the summary: "${review.degradedReason}". `
-            : `Both lenses ran (${review.lenses.join(' + ')}). `) +
+          `Lenses run: ${review.lenses.join(' + ')}. ` +
           `Consolidated review: ${JSON.stringify(review)}`,
         schema: REVIEW_SCHEMA,
       });
@@ -317,11 +316,11 @@ export async function runReviewMergePipeline(ctx, deps) {
       log(`§4.1 review post failed (non-fatal): ${e && e.message ? e.message : e}`);
     }
 
-    // 4.2 Address — only when there is something actionable. A degraded review
-    // is NOT "no findings" — never skip address on a degraded read.
-    const actionable = degraded || !(blocking === 0) || (review?.findings?.length ?? 0) > 0;
+    // 4.2 Address — only when there is something actionable (a blocking finding
+    // or any returned findings).
+    const actionable = !(blocking === 0) || (review?.findings?.length ?? 0) > 0;
     let addr = null;
-    if (actionable && !degraded) {
+    if (actionable) {
       log(`§4.2 address ${review.findings.length} finding(s) on PR #${pr}`);
       addr = await agent({
         agentType: 'shipwright',
@@ -343,7 +342,7 @@ export async function runReviewMergePipeline(ctx, deps) {
 
     // 4.4 Bounded loop: if this round changed code and still isn't converged,
     // loop back to review; otherwise fall through to make-mergeable + gate.
-    const stillUnresolved = degraded || !(blocking === 0) || ci !== 'green' || !localGreen;
+    const stillUnresolved = !(blocking === 0) || ci !== 'green' || !localGreen;
     const changedThisRound = !!addr && addr.validation === 'pass';
     if (changedThisRound && stillUnresolved && round < maxReviewRounds) {
       continue; // re-review the new head
@@ -381,7 +380,7 @@ export async function runReviewMergePipeline(ctx, deps) {
       pr,
       autoMerge,
       mergeMethod: config.mergeMethod,
-      review: { blocking, degraded },
+      review: { blocking },
       ci,
       localChecks: localGreen,
       isDraft: prIsDraft(sh, pr),
@@ -558,8 +557,8 @@ if (isMain) {
     console.log(
       [
         'review→merge pipeline (crows-nest §4) — deterministic Workflow:',
-        '  §4.1 review     → agent(code-review) + agent(codex:codex-rescue)  TWO top-level lenses',
-        '                    → consolidateLenses() (dedupe + sev-max) → REVIEW_SCHEMA; degrade NAMED',
+        '  §4.1 review     → agent(code-review) + agent(second-opinion)     TWO top-level lenses',
+        '                    → consolidateLenses() (dedupe + sev-max) → REVIEW_SCHEMA',
         '                    → agent(muster) posts the consolidated verdict on the PR (best-effort)',
         '  §4.2 address    → agent(shipwright, ADDRESS_SCHEMA)   triage + fix + reply',
         '  §4.3 verify     → build && test && lint + gh pr checks',

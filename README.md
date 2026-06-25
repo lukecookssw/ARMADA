@@ -24,7 +24,7 @@ the right skill from natural language — you rarely type the name.
 | **`charter`** | The work order. Turns a rough request into a well-formed, testable GitHub issue and arms it with the trigger label so the fleet picks it up. | ✅ shipped |
 | **`crows-nest`** | The lookout. A single, maximally parallel scheduler that runs under `/loop` and watches **both tracks at once** — new issues *and* ready PRs — graphs their dependencies/conflicts together, and dispatches independent builds and reviews **concurrently** up to per-track bounds. | ✅ shipped |
 | **`shipwright`** | The builder. Takes one issue and works it end-to-end in an isolated worktree, opening a PR. | ✅ shipped |
-| **`muster`** | Inspection before sailing. Reviews a ready PR through two parallel lenses (code-review + codex-rescue), dedupes, and posts inline comments + a summary. | ✅ shipped |
+| **`muster`** | Inspection before sailing. Reviews a ready PR through two parallel lenses (code-review + an independent second-opinion), dedupes, and posts inline comments + a summary. | ✅ shipped |
 | **`logbook`** | The voyage record. Turns a shipped change into a short narrated, chaptered walkthrough video and attaches it to the PR — stack-agnostic, driven by a reusable per-repo staging recipe (launch / stage / reach) that works for web, CLI, or API. | ✅ shipped |
 | **`cartographer`** | The mapmaker. Mines completed runs for actionable *per-repo* heuristics (`heuristic / evidence / confidence`) and maintains a reviewable knowledge base under `.armada/cartography/`, so the fleet specialises to a repo over time. shipwright reads it before building; crows-nest auto-runs it (best-effort, gated by `cartography`) at its reconcile points. | ✅ shipped |
 | **`lighthouse`** | The reconnaissance. The fleet's only *proactive* ship: surveys the repo for **future** work (failing/skipped tests, TODO/FIXME, missing coverage, stale docs, dependency smells, gaps) — and explores the running app with Playwright when it's runnable — then charters each high-value, de-duped finding as a well-formed issue, **unarmed** so a human review is the gate. crows-nest dispatches it opportunistically as low-priority background work when the fleet is idle (gated by `lighthouse.enabled`); existing build/review work always wins. | ✅ shipped |
@@ -182,10 +182,12 @@ fleet fixing itself end-to-end; it defaults `false`, and `commission` never turn
 
 ## Safety
 
-**Label discipline is the master switch.** `crows-nest` only ever acts on issues *and* PRs carrying
-the configured trigger label (`armada`). You arm autonomy by adding the label and disarm it by
-removing it — per object, no code change needed — so the fleet can't run away with your whole
-backlog.
+**This install builds every open issue.** `crows-nest` picks up *all* open issues that aren't
+already in an `armada:*` lifecycle state — the plain `armada` label is **not** required to enter the
+build queue (a deliberate change for a private repo where every issue is yours to build). To keep an
+issue out of the fleet, close it or label it `armada:blocked`. **PRs are still label-gated**:
+`crows-nest` only acts on PRs carrying the trigger label (`armada`), and the fleet auto-arms the PRs
+it opens — so a human PR is left alone unless you label it.
 
 **By default the fleet opens PRs and pushes commits but never merges** — the final merge stays a
 human action. The ready-PR review pipeline (`muster` review → `shipwright` address → re-validate)

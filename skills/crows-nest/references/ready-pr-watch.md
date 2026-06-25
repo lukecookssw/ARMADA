@@ -22,12 +22,57 @@ PR is **ready** — eligible for the frontier — when **all** hold:
 - **CI is not failing** — `statusCheckRollup` has no `FAILURE`/`ERROR`/`TIMED_OUT` checks (pending
   is fine to re-check next tick; a green or not-yet-failing rollup passes this stage);
 - it isn't **already mid-pipeline** — not labelled `armada:reviewing`, and not already
-  `armada:merged` or `armada:blocked` (terminal states a future tick must not re-pick).
+  `armada:merged` or `armada:blocked` (terminal states a future tick must not re-pick);
+- it is **fresh for review** — either the fleet has **not yet reviewed it**, **or** it has **new
+  human activity since the fleet's last review** (a comment, PR review, or commit added after the
+  review — see "Re-engage on new activity" below). A PR the fleet already reviewed that has had **no**
+  new human activity since is **held**, not re-reviewed.
 
-This is the ready-PR analogue of SKILL.md §2a's issue dedup, and `armada:reviewing` is the
-idempotency guard that stops a second tick double-driving the same PR. The graph (SKILL.md §2b) may
-still **hold** a ready PR behind a base-about-to-move or same-file edge even when it passes this gate
-— those held PRs are reported in SKILL.md §2e, not dispatched.
+This is the ready-PR analogue of SKILL.md §2a's issue dedup. There are **two** idempotency guards,
+covering the two windows in which a PR could be wrongly re-picked:
+
+- `armada:reviewing` is the **in-pipeline** guard — it stops a second tick double-driving a PR while
+  its review is still running.
+- the **fresh-for-review** clause is the **post-review** guard — it stops the fleet re-reviewing the
+  *same unchanged* PR on every tick (which, with `autoMerge` off, would otherwise post a duplicate
+  review every interval forever), **while still re-engaging the instant a human adds a comment**. A
+  reviewed PR is therefore **monitored, not abandoned**: quiet → held; new comment → picked back up.
+
+### Re-engage on new activity (post-review monitoring)
+
+After a review completes with `autoMerge` off (§3e), the PR returns to bare `armada` and the fleet's
+review summary comment (`🔭 crows-nest: ✅ reviewed … awaiting human merge`) stands as the
+**"reviewed-at" marker** — its `createdAt` is the point the last review covered. The marker is the
+comment itself, so **no new label is needed** and this works in any commissioned repo with no extra
+setup.
+
+On each tick, for every `armada` PR that passes the other gates, classify its review state from a
+**bounded per-candidate** fetch of its timeline (the SKILL.md §2a list projection doesn't carry it,
+so this is a small follow-up only for already-armed, otherwise-eligible PRs):
+
+```bash
+gh pr view <n> --json comments,reviews,latestReviews,commits
+```
+
+- **No fleet `✅ reviewed … awaiting human merge` marker comment** → **never reviewed** → eligible
+  (first review).
+- **A marker exists, and something is newer than it** — any **non-fleet** comment or PR review with
+  `createdAt` later than the marker, **or** a commit with `committedDate` later than the marker →
+  **new activity** → **eligible again (re-engage)**. The re-dispatched pipeline is told to **address
+  the new feedback** (muster re-review + shipwright address-review on the new comments), not blindly
+  repeat the prior review.
+- **A marker exists and nothing is newer** → **reviewed & quiet** → **held** with reason
+  `reviewed — awaiting human merge (no new activity)`; reported in SKILL.md §2e, **not** dispatched.
+
+**"Fleet" vs "human".** Fleet comments/reviews are those authored by the automation identity the
+fleet runs as and carrying the crows-nest/muster markers. **Everything else is human activity** — a
+maintainer's note, a reviewer's change request, a collaborator's question — and any of it, dated
+after the marker, re-opens the PR for the fleet. This is precisely what makes the fleet **monitor all
+open PRs for additional comments even after they've been reviewed**: a new comment is the signal that
+re-engages it.
+
+The graph (SKILL.md §2b) may still **hold** a ready PR behind a base-about-to-move or same-file edge
+even when it passes this gate — those held PRs are reported in SKILL.md §2e, not dispatched.
 
 ## 3b. Selection (the §2c frontier, up to `maxConcurrentReviews`)
 
@@ -69,7 +114,11 @@ PR-track label and a comment — a PR must **never** be left on `armada:reviewin
   the merge commit. (Only reachable with `autoMerge: true` and all gates green.)
 - `ready_awaiting_human` → `gh pr edit <n> --remove-label "armada:reviewing"` (leave `armada` on so a
   human sees it); comment "✅ reviewed, addressed, green — **awaiting human merge** (auto-merge off)".
-  This is the default terminal state when `autoMerge` is off.
+  This is the default terminal state when `autoMerge` is off. The PR returns to bare `armada`, and
+  **this comment is the "reviewed-at" marker** (§3a "Re-engage on new activity"): future ticks
+  **hold** it as reviewed-and-quiet instead of re-reviewing it on a loop, but **re-engage
+  automatically** the moment a human adds a new comment, review, or commit dated after this marker —
+  so a reviewed PR stays monitored, never abandoned and never blindly re-reviewed.
 - `blocked` → `gh pr edit <n> --remove-label "armada:reviewing" --add-label "armada:blocked"`; comment
   the reason (blocking finding, red CI, no convergence, non-mergeable, branch protection unmet).
 

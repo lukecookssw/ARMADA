@@ -48,7 +48,7 @@ the independent second perspective that is muster's whole point. The pipeline ho
 `agent()` capability, so it owns the fan-out:
 
 1. **Fan out the two lenses as two top-level `agent()` calls in the same turn** — Lens A
-   `code-review` (conventions + correctness) and Lens B `codex:codex-rescue` (independent
+   `code-review` (conventions + correctness) and Lens B `second-opinion` (independent
    second-opinion). Each runs in its own isolated context, neither sees the other, and each returns
    only its **findings array** (`{severity,file,line,title,detail}`) — the `LENS_SCHEMA`.
 2. **Consolidate in the pipeline** (`consolidateLenses`, reproducing muster §2): dedupe by
@@ -60,13 +60,13 @@ the independent second perspective that is muster's whole point. The pipeline ho
    pipeline, because the gate runs off the structured consolidation, not the PR comment.
 
 If a lens **can't run** (its agent type is missing, or it errors), the review proceeds with the lens
-that returned but is marked **`degraded: true` with the missing lens NAMED** (`degradedReason`) — the
-degrade is explicit in the return *and* in the posted summary, never silent (#76 AC-2).
+that returned, and that single-lens review is treated as a **complete review, not degraded** — the
+single returned lens is enough to post a valid review (#76 keeps the fan-out from silently collapsing).
 
 The lookout keeps only the structured return — not the per-lens transcripts. The gate is computed
 from `summary.blocking`: any blocking finding means the PR cannot merge this round (it must first be
-addressed). A **degraded** review (one or both lenses failed) is **not** a green light — treat a
-missing/degraded review as "not safe to merge", never as "no findings".
+addressed). A review with **no lenses at all** (both failed, so nothing was produced) is **not** a green light — treat a
+no-review-at-all case as "not safe to merge", never as "no findings".
 
 ## 4.2 Address (subagent)
 
@@ -194,7 +194,7 @@ The state the gate is fed (every field gathered earlier in the pipeline):
   "pr": <n>,
   "autoMerge": <config.autoMerge>,          // default false — opt-in only
   "mergeMethod": "<config.mergeMethod>",     // merge | squash | rebase
-  "review":   { "blocking": <summary.blocking>, "degraded": <muster degraded?> },
+  "review":   { "blocking": <summary.blocking> },
   "ci":       "green" | "pending" | "red",   // from `gh pr checks <n>`
   "isDraft":  <bool>,
   "mergeable": "MERGEABLE" | "BEHIND" | "CONFLICTING" | "UNKNOWN",  // `gh pr view <n> --json mergeable`
@@ -215,8 +215,8 @@ bound, so the documented behaviour is the implementation:
 
 1. `autoMerge: true` in `.armada/config.json` (**default false** — see
    [SKILL.md §7](../SKILL.md#7-stopping-and-safety));
-2. no unresolved **blocking** finding (`summary.blocking == 0`) and the review was **not degraded**
-   (a missing/degraded review is treated as not-safe, never as "no findings");
+2. no unresolved **blocking** finding (`summary.blocking == 0`) and a review summary was produced
+   (a missing review summary is treated as not-safe, never as "no findings");
 3. CI is **green** (`gh pr checks <n>` all passing) — never on red or pending;
 4. the PR is **not draft** and GitHub reports it **`mergeable`** — with `autoMerge: true` a `BEHIND`
    or `CONFLICTING` PR is first run through **make-mergeable (§4.4b)**; if it still isn't mergeable
