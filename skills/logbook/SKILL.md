@@ -245,13 +245,21 @@ script do the work.
 ## 6. Attach to the PR — a per-PR release asset
 
 Upload the finished video as a **GitHub release asset scoped to this PR** (release assets host
-binaries that PR comments can't), then comment the link on the PR:
+binaries that PR comments can't), then comment the link on the PR.
+
+**Write as the App when `fleetLogin` is set.** The release create/edit/upload and the PR comment are
+fleet writes — prefix each with a freshly-minted token
+(`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh …`, per
+[crows-nest/references/fleet-identity.md](../crows-nest/references/fleet-identity.md); the App's
+Contents:write permission covers releases). Drop the prefix when `fleetLogin` is blank. Reads
+(`gh release view`, `gh pr view`) need no token.
 
 ```bash
 TAG="logbook-pr-${PR}"
-gh release create "$TAG" --title "Walkthrough — PR #${PR}" --notes "Narrated walkthrough for #${PR}." 2>/dev/null \
-  || gh release edit "$TAG" --title "Walkthrough — PR #${PR}"   # idempotent: reuse the per-PR tag on re-record
-gh release upload "$TAG" "<video file>" --clobber
+TOK() { node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs"; }   # fleetLogin set: mint; blank: replace body with `:` and drop GH_TOKEN= below
+GH_TOKEN="$(TOK)" gh release create "$TAG" --title "Walkthrough — PR #${PR}" --notes "Narrated walkthrough for #${PR}." 2>/dev/null \
+  || GH_TOKEN="$(TOK)" gh release edit "$TAG" --title "Walkthrough — PR #${PR}"   # idempotent: reuse the per-PR tag on re-record
+GH_TOKEN="$(TOK)" gh release upload "$TAG" "<video file>" --clobber
 ASSET_URL=$(gh release view "$TAG" --json assets --jq '.assets[] | select(.name | endswith(".mp4")) | .url')
 
 # If the PR body carries a "Requested by @<user>" line (shipwright §7 copies it from the issue when
@@ -263,7 +271,7 @@ NOTE="🎬 Walkthrough video: ${ASSET_URL}"
 [ -n "$REQUESTER" ] && NOTE="${NOTE}
 
 cc @${REQUESTER} — here's the walkthrough of the feature you suggested."
-gh pr comment "$PR" --body "$NOTE"
+GH_TOKEN="$(TOK)" gh pr comment "$PR" --body "$NOTE"
 ```
 
 **Notify the requester, when the PR names one.** If the PR body carries a `Requested by @<user>` line

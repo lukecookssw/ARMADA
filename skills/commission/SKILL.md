@@ -65,6 +65,7 @@ overwriting** — the user may have hand-tuned it.
   "triggerLabel": "armada",        // crows-nest only acts on issues/PRs with this label
   "dispatch": "shipwright",        // "shipwright" (one build pass) or "flagship" (auto loop)
   "baseBranch": "<detected default>",
+  "fleetLogin": "",                // "" = fleet & human share `gh`'s login (detect by marker). Set to a GitHub App bot login (e.g. "my-app[bot]") to give the fleet its OWN identity → author-based detection. See crows-nest/references/fleet-identity.md.
   "authors": "",                   // "" = act on anyone; "alice" or "alice,bob" to restrict by author
   "autoMerge": false,              // ready-PR pipeline may merge? Default false: stop-before-merge.
   "notify": "terminal",            // ship's bell: "off" | "blocked" | "terminal" | "all". Default "terminal" (shipped + blocked).
@@ -117,6 +118,15 @@ Write `authors` as `""` by default so the fresh repo acts on issues from anyone 
 change). It's an optional allowlist — leave it blank, set a single username (`"calumjs"`), or a
 comma-separated list (`"calumjs, dependabot[bot]"`) to restrict which issue authors crows-nest will
 pick up (matched case-insensitively; see crows-nest §2a).
+
+Write `fleetLogin` as `""` by default. When blank, the fleet runs under the maintainer's own `gh`
+login and "fleet vs human" is decided by **comment markers** (the historical default — works with no
+extra setup). If you give the fleet its own **GitHub App** identity (the recommended setup for
+multi-repo / multi-machine fleets), set `fleetLogin` to the App's **bot login** — the App slug + `[bot]`,
+e.g. App "LC Armada Fleet" → `"lc-armada-fleet[bot]"`. Detection then becomes **author-based and
+unambiguous** (`author.login == fleetLogin → fleet`), and every fleet write/commit is authored by the
+App. Only the public bot login goes here; the App id / installation id / private-key path live in the
+environment, never in config. Full walkthrough: **crows-nest/references/fleet-identity.md**.
 
 Add `.armada/` is fine to commit (it's project config, not secrets). Mention that the user can edit
 `triggerLabel`/`dispatch`/`authors` later. **Write `autoMerge: false`** — never commission a repo with

@@ -47,29 +47,53 @@ comment itself, so **no new label is needed** and this works in any commissioned
 setup.
 
 On each tick, for every `armada` PR that passes the other gates, classify its review state from a
-**bounded per-candidate** fetch of its timeline (the SKILL.md §2a list projection doesn't carry it,
-so this is a small follow-up only for already-armed, otherwise-eligible PRs):
+**bounded per-candidate** fetch of its **full** timeline. "Full" is the operative word: a reviewed
+PR's new feedback most often arrives as an **inline reply inside one of the review threads**, and
+those replies are **not** returned by `gh pr view --json comments` (which carries only top-level PR
+comments). You must therefore union **three** comment surfaces — top-level comments, review
+submissions, and **inline review-thread comments/replies** — or you will miss exactly the comments a
+reviewer leaves in response to the review (this is the bug that let an inline "please also do X" reply
+sit unactioned because the check only looked at top-level comments):
 
 ```bash
-gh pr view <n> --json comments,reviews,latestReviews,commits
+gh pr view <n> --json comments,reviews,commits      # top-level comments, review bodies, commits
+gh api repos/<owner>/<repo>/pulls/<n>/comments       # inline review-THREAD comments + replies
 ```
 
-- **No fleet `✅ reviewed … awaiting human merge` marker comment** → **never reviewed** → eligible
+Build the timeline as the **union of all three comment surfaces** — top-level `comments[].createdAt`,
+review `reviews[].submittedAt`, and inline `pulls/<n>/comments[].created_at` — plus commit
+`commits[].committedDate`. Then:
+
+- **No fleet `✅ reviewed … awaiting human merge` marker exists** → **never reviewed** → eligible
   (first review).
-- **A marker exists, and something is newer than it** — any **non-fleet** comment or PR review with
-  `createdAt` later than the marker, **or** a commit with `committedDate` later than the marker →
-  **new activity** → **eligible again (re-engage)**. The re-dispatched pipeline is told to **address
-  the new feedback** (muster re-review + shipwright address-review on the new comments), not blindly
-  repeat the prior review.
-- **A marker exists and nothing is newer** → **reviewed & quiet** → **held** with reason
+- **A marker exists, and any non-fleet event is newer than it** — a top-level comment, a review, an
+  **inline review-thread reply**, or a commit dated after the marker → **new activity** → **eligible
+  again (re-engage)**. The re-dispatched pipeline is told to **address the new feedback** (shipwright
+  address-review on the new comments — *including the inline replies* — re-validate, push, reply per
+  thread), not blindly repeat the prior review.
+- **A marker exists and nothing non-fleet is newer** → **reviewed & quiet** → **held** with reason
   `reviewed — awaiting human merge (no new activity)`; reported in SKILL.md §2e, **not** dispatched.
 
-**"Fleet" vs "human".** Fleet comments/reviews are those authored by the automation identity the
-fleet runs as and carrying the crows-nest/muster markers. **Everything else is human activity** — a
-maintainer's note, a reviewer's change request, a collaborator's question — and any of it, dated
-after the marker, re-opens the PR for the fleet. This is precisely what makes the fleet **monitor all
-open PRs for additional comments even after they've been reviewed**: a new comment is the signal that
-re-engages it.
+**"Fleet" vs "human" — how to classify each event depends on `fleetLogin`** (config; see
+[fleet-identity.md § Detection](fleet-identity.md#detection-fleet-vs-human), the canonical rule):
+
+- **`fleetLogin` is set (the fleet has its own GitHub App identity) → author-based is PRIMARY.** An
+  event is **fleet** iff its `author.login` (or commit author) **equals `fleetLogin`**
+  (case-insensitive, e.g. `lc-armada-fleet[bot]`); **everything else is human** and, dated after the
+  marker, re-opens the PR. Fleet markers (`🔭 crows-nest:`, `## muster review`,
+  `✅ reviewed … awaiting human merge`, inline findings) are kept only as a **backstop** for legacy
+  fleet comments written before the App switch — treat marker-carrying comments as fleet too. Because
+  the maintainer's account ≠ the bot, the maintainer's **inline review replies are unambiguously
+  human** and reliably re-engage the PR.
+- **`fleetLogin` is blank (fleet runs under the maintainer's own `gh` login) → decide by MARKER, not
+  by author.** A fleet comment/review is one that carries a fleet marker (the prefixes above);
+  **everything without a fleet marker is human activity**. **Do not filter by `author.login` in this
+  mode:** the fleet's comments and the human's share the *same* login, so author detection fails both
+  ways — it either treats the human's reply as "fleet" (ignoring it forever) or the fleet's own marker
+  as "human" (re-reviewing on a loop). The **marker** is the only reliable signal here.
+
+Either way the fleet **monitors all open PRs for additional comments even after review — including
+inline thread replies** — and any human event dated after its last action re-opens the PR.
 
 The graph (SKILL.md §2b) may still **hold** a ready PR behind a base-about-to-move or same-file edge
 even when it passes this gate — those held PRs are reported in SKILL.md §2e, not dispatched.
@@ -84,9 +108,13 @@ the harbour is clear.
 
 ## 3c. Claim it
 
+These — and the §3e reconcile labels/comments — are fleet writes: when `fleetLogin` is set, prefix
+each with a freshly-minted App token (`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh …`,
+per [fleet-identity.md](fleet-identity.md)); drop the prefix when `fleetLogin` is blank.
+
 ```bash
-gh pr edit <n> --add-label "armada:reviewing"
-gh pr comment <n> --body "🔭 crows-nest: ready-PR pipeline started — review → address → re-validate → gated merge."
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh pr edit <n> --add-label "armada:reviewing"
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh pr comment <n> --body "🔭 crows-nest: ready-PR pipeline started — review → address → re-validate → gated merge."
 ```
 
 ## 3d. Drive the pipeline (background Workflow)

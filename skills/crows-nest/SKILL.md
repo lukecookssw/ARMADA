@@ -88,6 +88,13 @@ Read `.armada/config.json` from the target repo:
     (surrounding whitespace around each name is trimmed).
   - **A JSON array** — e.g. `["alice", "bob"]` → same as the comma-separated form. The string form
     is the documented/primary shape; the array is accepted for convenience.
+- `fleetLogin` — the fleet's **own GitHub identity**, when it runs as a GitHub App. Blank `""`
+  (default) = the fleet shares the maintainer's `gh` login and "fleet vs human" is decided by comment
+  **markers**. Set to a bot login (e.g. `"lc-armada-fleet[bot]"`) and the fleet (a) **authors every
+  write/commit as the App** by minting a token per write, and (b) classifies fleet-vs-human
+  **by author** (`author.login == fleetLogin`), with markers as a backstop. Read it now; you apply it
+  at every write and in the §3a re-engage check. The full convention — env vars, the token helper, the
+  write-wrapping rule, commit identity, detection — is **[references/fleet-identity.md](references/fleet-identity.md)**.
 - `autoMerge` — whether the ready-PR pipeline may perform the final merge. **Default `false`**: with
   it off the pipeline reviews, addresses, and re-validates but **stops before merging** (§4.5). Only
   `true` lets the lookout merge, and only when every other gate passes. See [Safety](#7-stopping-and-safety).
@@ -406,12 +413,19 @@ For each issue on the frontier (§2c), within the `maxConcurrentBuilds` budget:
 
 #### 2d.i Claim it
 
+**Write as the App when `fleetLogin` is set.** Every fleet write the lookout makes — these claim
+labels/comments, and the §3c claim, §3e reconcile, and §5 close-the-loop writes — is prefixed with a
+freshly-minted token so it's authored by the bot:
+`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh …` (the write-wrapping
+convention in [references/fleet-identity.md](references/fleet-identity.md)). Drop the prefix when
+`fleetLogin` is blank. Reads (`gh issue list`, `gh pr view`, the §2a scan) take **no** token.
+
 ```bash
-gh issue edit <number> --add-label "armada:underway"
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh issue edit <number> --add-label "armada:underway"
 # The trigger label is no longer required to enter the build queue; strip it only if present
 # (a manually-opened issue won't carry it, so ignore the error when it isn't there).
-gh issue edit <number> --remove-label "<triggerLabel>" 2>/dev/null || true
-gh issue comment <number> --body "🔭 crows-nest: picked up by ARMADA — dispatching to <dispatch target>."
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh issue edit <number> --remove-label "<triggerLabel>" 2>/dev/null || true
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh issue comment <number> --body "🔭 crows-nest: picked up by ARMADA — dispatching to <dispatch target>."
 ```
 
 #### 2d.ii Dispatch it

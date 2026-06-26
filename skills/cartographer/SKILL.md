@@ -276,6 +276,12 @@ deliberate hand edit, never something commissioning enables (same posture as `au
 Cartography is repo knowledge that future builds *trust*, so an update must be **reviewed, never a
 silent commit to the base branch**. cartographer rides the existing review machinery:
 
+> **Commit/push as the App when `fleetLogin` is set.** The cartography commit, branch push, and any
+> `gh pr create` are fleet writes — set the bot's git identity in the working tree and mint a token
+> for the push/PR exactly as shipwright does (§4a + the write-wrapping convention in
+> [crows-nest/references/fleet-identity.md](../crows-nest/references/fleet-identity.md)). Drop the
+> token/identity steps when `fleetLogin` is blank.
+
 - **When there's an active ARMADA PR** (the common case — the run that produced the learning is on an
   open PR): **commit the `.armada/cartography/` changes into that PR's branch.** The update then rides
   the same [`muster`](../muster/SKILL.md) review + `autoMerge` gate as the code — a reviewer sees the

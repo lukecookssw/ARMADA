@@ -132,10 +132,17 @@ Merge the two arrays into one finding set:
 Leave the verdict **on the PR**, not just in chat — the whole point is a durable review the builder
 and a human can act on.
 
+**Post as the App when `fleetLogin` is set.** Every comment below is a fleet write — prefix each with
+a freshly-minted token (`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh …`,
+per [crows-nest/references/fleet-identity.md](../crows-nest/references/fleet-identity.md)) so the
+review is authored by the bot and the re-engage check counts it as fleet, not as fresh human activity.
+Drop the prefix when `fleetLogin` is blank. Reads (`gh pr view`, `gh pr diff`) need no token.
+
 - **Inline comments**, one per finding that has a `file` + `line`, anchored to the diff:
 
   ```bash
-  gh api repos/{owner}/{repo}/pulls/<n>/comments \
+  GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+    gh api repos/{owner}/{repo}/pulls/<n>/comments \
     -f body="**[<severity>] <title>**
 
   <detail>
@@ -155,7 +162,8 @@ and a human can act on.
   (`N blocking, M major — not ready` / `no blocking findings — review advisory only`). This is what
   a human skims first.
 
-Post the summary with `gh pr comment <n> --body "<summary>"`. **`muster` does not approve, request
+Post the summary with `GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh pr
+comment <n> --body "<summary>"` (drop the prefix when `fleetLogin` is blank). **`muster` does not approve, request
 changes, resolve threads, or merge** — it reviews and reports. Acting on the findings is
 [`shipwright`](../shipwright/SKILL.md)'s job (address-review mode); gating the merge is
 [`crows-nest`](../crows-nest/SKILL.md)'s.

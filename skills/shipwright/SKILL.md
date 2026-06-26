@@ -262,6 +262,23 @@ Agent tool created are the harness's to reap — only clean up the ones *you* ad
 dependency install in a fresh tree (e.g. `npm ci`, `bundle install`, restoring packages), do it
 in the worktree.
 
+### 4a. Set the fleet's commit identity (when the fleet has an App identity)
+
+If `.armada/config.json` has a non-blank **`fleetLogin`** (the fleet runs as a GitHub App — see
+[`crows-nest/references/fleet-identity.md`](../crows-nest/references/fleet-identity.md)), set git's
+author/committer **in this worktree, before the first commit**, so commits and the PR are authored by
+the bot, not the maintainer:
+
+```bash
+# fleetLogin and the bot's numeric user id (gh api users/<fleetLogin> --jq .id; stable per App)
+git config user.name  "<fleetLogin>"                                              # e.g. lc-armada-fleet[bot]
+git config user.email "<bot-user-id>+<fleetLogin>@users.noreply.github.com"       # e.g. 296802139+lc-armada-fleet[bot]@users.noreply.github.com
+```
+
+If `fleetLogin` is blank, **skip this** — commits use the maintainer's ambient git identity, exactly
+as before. (All `gh`/`git push` writes below are likewise wrapped with an App token only when
+`fleetLogin` is set; see fleet-identity.md's write-wrapping convention.)
+
 ## 5. Implement
 
 Follow the approved plan. **Match the surrounding code** — its naming, structure, error handling,
@@ -335,8 +352,15 @@ Hold the bar:
 
 ## 7. Open the pull request
 
+Push and open the PR. **When `fleetLogin` is set, every write below runs as the App** — prefix the
+push, `gh pr create`, and any `gh pr edit`/`gh pr comment` with a freshly-minted token (the
+write-wrapping convention in [fleet-identity.md](../crows-nest/references/fleet-identity.md)); when
+`fleetLogin` is blank, drop the prefix and use ambient `gh` auth.
+
 ```bash
-git push -u origin <branch>
+# Once per worktree, so git pushes carry the App token (no-op when fleetLogin is blank):
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh auth setup-git --hostname github.com >/dev/null 2>&1
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" git push -u origin <branch>
 ```
 
 Write the PR body from [references/pr-template.md](references/pr-template.md): what changed and why,
@@ -366,11 +390,15 @@ handle where the §9 walkthrough follow-up can read it too. Copy **only** that l
 `@<handle>` — never any other text from the issue.
 
 ```bash
-gh pr create --title "<concise title>" --body "$(cat <<'EOF'
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh pr create --title "<concise title>" --body "$(cat <<'EOF'
 <PR body>
 EOF
 )"
 ```
+
+(Drop the `GH_TOKEN=…` prefix when `fleetLogin` is blank. The same prefix applies to the `gh pr edit`
+self-correct and auto-arm writes below.)
 
 **Don't comment on the host issue — return the PR link in your result and let the foreground lookout
 post it.** When shipwright runs as a dispatched **subagent** (the autonomous `crows-nest` path), it
@@ -395,8 +423,10 @@ by editing the body** rather than reporting `opened` with a PR that won't auto-c
 pr=<pr-number>; n=<issue-number>
 body=$(gh pr view "$pr" --json body --jq '.body')
 if ! printf '%s' "$body" | grep -Eiq "(close[sd]?|fix(e[sd])?|resolve[sd]?) +#$n\b"; then
-  # Keyword absent — append it to the body so the merge auto-closes the issue.
-  gh pr edit "$pr" --body "$(printf '%s\n\nCloses #%s\n' "$body" "$n")"
+  # Keyword absent — append it to the body so the merge auto-closes the issue. (App-token prefix
+  # when fleetLogin is set — see fleet-identity.md.)
+  GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+    gh pr edit "$pr" --body "$(printf '%s\n\nCloses #%s\n' "$body" "$n")"
 fi
 ```
 
@@ -415,7 +445,8 @@ so [`crows-nest`](../crows-nest/SKILL.md)'s ready-PR watch (§3) picks it up wit
 step:
 
 ```bash
-gh pr edit <pr-number> --add-label "<triggerLabel>"   # default "armada"
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh pr edit <pr-number> --add-label "<triggerLabel>"   # default "armada" (drop prefix if fleetLogin blank)
 ```
 
 This is deliberate and safe: the ready-PR pipeline's only *consequential* action is the final
@@ -527,8 +558,13 @@ gh pr view <n> --json headRefName,baseRefName,mergeable,author,commits
 git log --format='%an <%ae>' origin/<baseBranch>..origin/<headRef>
 ```
 
-If the branch carries non-ARMADA commits, stop here → `blocked` ("branch has human commits; rebase
-by hand"). Otherwise continue.
+**Deciding "all ARMADA's":** when `fleetLogin` is set (App identity), a fleet commit is one whose
+author **is the bot** — author name `<fleetLogin>` / email `<bot-user-id>+<fleetLogin>@users.noreply.github.com`
+(§4a). Any commit by another author is a **human** commit. When `fleetLogin` is blank, the fleet and
+the human share one git identity, so authorship can't tell them apart — fall back to the historical
+assumption (the branch is fleet-owned because ARMADA opened it) and stop only if there's other
+evidence of human commits. If the branch carries non-fleet commits, stop here → `blocked` ("branch has
+human commits; rebase by hand"). Otherwise continue.
 
 ### 12b. Check out the PR branch on its own worktree
 
@@ -538,6 +574,9 @@ Work on the PR's branch — never a fresh one — so the force-push lands on the
 gh pr checkout <n>        # or: git worktree add ../<n>-rebase <prHeadRef>
 git fetch origin <baseBranch>
 ```
+
+Set the bot's git identity in this worktree (§4a) before rebasing, so any conflict-resolution commits
+are authored by the App too — when `fleetLogin` is set.
 
 ### 12c. Rebase onto the configured base and resolve conflicts
 
@@ -599,7 +638,8 @@ push is refused if the remote moved under you — a guard against clobbering an 
 push:
 
 ```bash
-git push --force-with-lease origin <headRef>
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  git push --force-with-lease origin <headRef>   # drop prefix if fleetLogin blank
 ```
 
 Then comment the PR with what happened (`gh pr comment <n>`): rebased onto `<baseBranch>`, conflicts

@@ -158,17 +158,26 @@ auto-arm — offer draft-only or no-arm instead, never a created-and-armed unbui
 
 Create via `gh` with the appropriate **type label** per repo conventions (`enhancement` for a
 feature, `bug` for a defect, etc.). Then, unless overridden, add the `triggerLabel` read from config
-**in the same step** so there's no window where the issue exists unarmed:
+**in the same step** so there's no window where the issue exists unarmed.
+
+**Author as the App when `fleetLogin` is set.** Creating and arming an issue are fleet writes — prefix
+each with a freshly-minted token (`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh …`,
+per [crows-nest/references/fleet-identity.md](../crows-nest/references/fleet-identity.md)) so the
+issue is authored by the bot. This is also what makes the public-intake **anti-loop guard** reliable:
+fleet-chartered issues are authored by `fleetLogin` and so are never re-screened. Drop the prefix when
+`fleetLogin` is blank.
 
 ```bash
 # Create with the type label:
-gh issue create --title "<ship: capability>" --label "<enhancement|bug|…>" --body "$(cat <<'EOF'
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh issue create --title "<ship: capability>" --label "<enhancement|bug|…>" --body "$(cat <<'EOF'
 <the confirmed body>
 EOF
 )"
 
 # Arm it (default) — add the trigger label read from .armada/config.json (default "armada"):
-gh issue edit <new-number> --add-label "<triggerLabel>"
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh issue edit <new-number> --add-label "<triggerLabel>"
 ```
 
 For `--no-arm`, skip the second command. For draft-only, run neither.
@@ -244,7 +253,10 @@ hazard. Default to the safe side:
 
 ```bash
 # Filed and labelled, but NOT armed — left for human triage (default):
-gh issue create --repo <armadaRepo> --label "fleet-defect" --title "<skill>: <defect>" --body "<report>"
+# As the App when fleetLogin is set AND the App is installed on <armadaRepo>; otherwise (or if the
+# token can't see that repo) fall back to ambient gh — this is best-effort/side-channel (§9f).
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh issue create --repo <armadaRepo> --label "fleet-defect" --title "<skill>: <defect>" --body "<report>"
 ```
 
 - Self-raised issues are labelled **`fleet-defect`** and are **not** auto-armed — even though

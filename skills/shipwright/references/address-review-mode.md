@@ -75,28 +75,40 @@ with the reason, not a broken push.
 
 ## 11f. Push and reply per thread
 
+**Run as the App when `fleetLogin` is set.** The push, the per-thread replies, and the top-level
+summary are all fleet writes — prefix each with a freshly-minted token so they're authored by the bot
+and the **author-based re-engage check counts them as fleet** (not as new human activity that would
+loop the PR). See the write-wrapping convention in
+[fleet-identity.md](../../crows-nest/references/fleet-identity.md). Set the bot's git identity in this
+PR worktree first (SKILL.md §4a). Drop the `GH_TOKEN=…` prefixes when `fleetLogin` is blank.
+
 ```bash
-git push                       # to the PR's own branch — updates the PR in place
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  git push                     # to the PR's own branch — updates the PR in place
 ```
 
 Then **reply to each thread** so the reviewer sees a response on every point. Reply on the specific
-comment thread (`in_reply_to`), don't just leave one blanket comment:
+comment thread (`in_reply_to`), don't just leave one blanket comment (each `gh api … POST` is a write,
+so it carries the same token prefix):
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<n>/comments \
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh api repos/{owner}/{repo}/pulls/<n>/comments \
   -f body="Fixed in <sha> — <one line>."   -F in_reply_to=<comment_id>
 # or, when declining:
-gh api repos/{owner}/{repo}/pulls/<n>/comments \
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh api repos/{owner}/{repo}/pulls/<n>/comments \
   -f body="Declined: <one-line rationale>." -F in_reply_to=<comment_id>
 # discuss:
-gh api repos/{owner}/{repo}/pulls/<n>/comments \
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+  gh api repos/{owner}/{repo}/pulls/<n>/comments \
   -f body="Suggest instead <alternative> — <why>. Let me know."  -F in_reply_to=<comment_id>
 ```
 
 **Do not resolve threads** — resolving is the reviewer's call. Shipwright replies and leaves the
 thread open unless the repo is explicitly configured to let the builder resolve. Post a short
-top-level summary too (`gh pr comment <n>`): how many agreed/implemented, discussed, declined, and
-the new head sha.
+top-level summary too (`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh pr
+comment <n>`): how many agreed/implemented, discussed, declined, and the new head sha.
 
 ## 11g. Return the structured result
 

@@ -231,10 +231,14 @@ plus the **convergence bound** (§4.4): if blocking findings or red CI persist o
 Acting on the decision:
 
 - **`merge`** → merge with the **configured method**, **reap the merged head branch**, and record
-  `merged`:
+  `merged`. The merge and the branch-reap push are fleet writes — when `fleetLogin` is set, run them
+  with a freshly-minted App token (`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" …`,
+  per [fleet-identity.md](fleet-identity.md)) so the merge is attributed to the App; drop the prefix
+  when `fleetLogin` is blank:
 
   ```bash
-  gh pr merge <n> --<mergeMethod>   # merge | squash | rebase, from config — then reap (below)
+  GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+    gh pr merge <n> --<mergeMethod>   # merge | squash | rebase, from config — then reap (below)
   ```
 
   **Warn on a local-validation-only merge.** When this merge runs with `autoMerge: true` but the PR

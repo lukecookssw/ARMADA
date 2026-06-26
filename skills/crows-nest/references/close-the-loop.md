@@ -60,12 +60,15 @@ open — a wrongly-closed issue is worse than a stale `armada:done`.
 ## 5d. Close with a trail
 
 When both gates pass, close the issue with a comment that links the merged PR and maps the criteria,
-then reconcile the labels to the terminal state:
+then reconcile the labels to the terminal state. These (and the branch reap below) are fleet writes —
+prefix each with a freshly-minted token when `fleetLogin` is set
+(`GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh …`, per
+[fleet-identity.md](fleet-identity.md)); drop the prefix when `fleetLogin` is blank:
 
 ```bash
-gh issue close <number> \
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh issue close <number> \
   --comment "🔭 crows-nest: shipped in #<pr> (merged <sha>). ACs: <each criterion → where it was met>."
-gh issue edit <number> \
+GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" gh issue edit <number> \
   --add-label "armada:shipped" \
   --remove-label "armada:done" --remove-label "armada:underway" --remove-label "armada:reviewing"
 ```
@@ -94,7 +97,8 @@ head=$(gh pr view <pr> --json headRefName,state --jq 'select(.state=="MERGED")|.
 if [ -n "$head" ] && [ "$head" != "<baseBranch>" ] \
    && git ls-remote --exit-code --heads origin "$head" >/dev/null 2>&1 \
    && [ "$(gh pr list --state open --head "$head" --json number --jq 'length')" = "0" ]; then
-  git push origin --delete "$head" || echo "branch reap skipped (protection/permission?) — non-fatal"
+  GH_TOKEN="$(node "${CLAUDE_PLUGIN_ROOT}/scripts/mint-app-token.mjs")" \
+    git push origin --delete "$head" || echo "branch reap skipped (protection/permission?) — non-fatal"
 fi
 ```
 
