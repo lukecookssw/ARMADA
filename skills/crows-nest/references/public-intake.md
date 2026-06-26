@@ -76,7 +76,10 @@ Then filter **client-side** to the genuine public candidates — keep an issue *
 - **Not fleet- or operator-authored.** Its `author.login` is **not** a *trusted* login. Resolve the
   trusted set once per session and cache it: it's `gh api user --jq .login` (the operator running the
   fleet) **plus, when `fleetLogin` is set, the App bot login** (the fleet charters via its GitHub App
-  token, so its issues are authored by the bot — see [fleet-identity.md](fleet-identity.md)). This is
+  token, so its issues are authored by the bot — see [fleet-identity.md](fleet-identity.md)). Compare
+  with the **`[bot]`-suffix normalisation** from fleet-identity.md § Detection — `gh issue list --json
+  author` returns the bot login `[bot]`-stripped, so match `strip(author.login)` against the stripped
+  trusted logins or the guard misses the fleet's own chartered issues. This is
   the **anti-loop guard**: every issue public intake itself charters is authored by the fleet identity,
   so it can never be re-scanned and re-chartered — even when filed unarmed (which carries no `armada:*`
   label). Including the operator's own login keeps their hand-filed issues from being treated as

@@ -78,9 +78,12 @@ review `reviews[].submittedAt`, and inline `pulls/<n>/comments[].created_at` —
 [fleet-identity.md § Detection](fleet-identity.md#detection-fleet-vs-human), the canonical rule):
 
 - **`fleetLogin` is set (the fleet has its own GitHub App identity) → author-based is PRIMARY.** An
-  event is **fleet** iff its `author.login` (or commit author) **equals `fleetLogin`**
-  (case-insensitive, e.g. `lc-armada-fleet[bot]`); **everything else is human** and, dated after the
-  marker, re-opens the PR. Fleet markers (`🔭 crows-nest:`, `## muster review`,
+  event is **fleet** iff its `author.login` (or commit author) **equals `fleetLogin`** after
+  **normalising the `[bot]` suffix off both sides** (case-insensitive). This normalisation is
+  **required**: GraphQL/`--json` returns the bot login `[bot]`-stripped (`lc-armada-fleet`) while REST
+  returns it in full (`lc-armada-fleet[bot]`), so a raw compare misses the fleet's own top-level
+  comments/reviews and loops — see [fleet-identity.md § Detection](fleet-identity.md#detection-fleet-vs-human).
+  **Everything else is human** and, dated after the marker, re-opens the PR. Fleet markers (`🔭 crows-nest:`, `## muster review`,
   `✅ reviewed … awaiting human merge`, inline findings) are kept only as a **backstop** for legacy
   fleet comments written before the App switch — treat marker-carrying comments as fleet too. Because
   the maintainer's account ≠ the bot, the maintainer's **inline review replies are unambiguously

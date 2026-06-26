@@ -105,9 +105,23 @@ commits use the maintainer's ambient git identity.
 This is the rule crows-nest's ready-PR re-engage check (§3a) and any other "did a human act?" check
 use:
 
+> **Normalise the `[bot]` suffix before comparing — this is mandatory, not optional.** GitHub returns
+> a bot's login **two different ways**: the **REST** API (`gh api repos/.../pulls/<n>/comments`, used
+> for inline review-thread replies) returns the full `lc-armada-fleet[bot]`, but the **GraphQL/`--json`**
+> projection (`gh pr view --json comments,reviews`, `gh issue list --json author`) returns it **with
+> `[bot]` stripped** — `lc-armada-fleet`. So a raw `author.login == fleetLogin` check **matches the
+> inline replies but misses the fleet's own top-level comments and reviews**, misclassifying them as
+> human and re-reviewing on a loop. **Always compare after stripping an optional trailing `[bot]` from
+> *both* sides**, case-insensitively: `strip(author.login) == strip(fleetLogin)` where
+> `strip(x) = x.lower().removesuffix("[bot]")`. (`fleetLogin` is stored *with* `[bot]`, e.g.
+> `lc-armada-fleet[bot]`, so it must be stripped too.) The same normalisation applies to the
+> public-intake trusted-author guard (P1) and anywhere else a `--json author.login` is matched against
+> `fleetLogin`.
+
 - **`fleetLogin` is set (App mode): author-based is PRIMARY.** An event (comment, review, inline
-  reply, commit) is **fleet** iff its `author.login` (or commit author) **equals `fleetLogin`**
-  (case-insensitive). Everything else is **human** → re-engage. The fleet's own marker text
+  reply, commit) is **fleet** iff its `author.login` (or commit author), **`[bot]`-normalised as
+  above**, **equals the `[bot]`-normalised `fleetLogin`**. Everything else is **human** → re-engage.
+  The fleet's own marker text
   (`🔭 crows-nest:`, `## muster review`, `✅ reviewed … awaiting human merge`) is kept only as a
   **backstop** for any legacy fleet comment written before the App switch (treat marker-carrying
   comments as fleet too). Because the maintainer's account ≠ the bot, the maintainer's inline review
