@@ -88,17 +88,24 @@ In each build worktree, set git's author/committer to the bot so commits and the
 author. The bot's noreply email is `<bot-user-id>+<fleetLogin>@users.noreply.github.com`; fetch
 `<bot-user-id>` once with `gh api "users/<fleetLogin>" --jq .id` (it's stable per App). Then:
 
+**Scope it to the worktree with `--worktree`** — a plain `git config user.name` writes the **shared**
+`.git/config` (worktrees share it unless `extensions.worktreeConfig` is on), which **leaks the bot
+identity into the maintainer's main checkout** so their next hand commit is mis-authored as the bot.
+Enable the per-worktree extension (a harmless repo-wide flag) and set the identity worktree-locally:
+
 ```bash
-git config user.name  "lc-armada-fleet[bot]"
-git config user.email "296802139+lc-armada-fleet[bot]@users.noreply.github.com"
+git config extensions.worktreeConfig true                                          # one-time; safe to re-run
+git config --worktree user.name  "lc-armada-fleet[bot]"
+git config --worktree user.email "296802139+lc-armada-fleet[bot]@users.noreply.github.com"
 ```
 
 > For the **LC Armada Fleet** App in this repo the values are filled in above
 > (`fleetLogin = lc-armada-fleet[bot]`, bot user id `296802139`). For a different App, derive them
 > from `fleetLogin` + the `gh api users/<fleetLogin>` lookup.
 
-Set these in the worktree **before the first commit**. If `fleetLogin` is blank, don't set them — let
-commits use the maintainer's ambient git identity.
+Set these in the worktree **before the first commit**; `--worktree` keeps them in
+`.git/worktrees/<wt>/config.worktree`, out of the maintainer's checkout. If `fleetLogin` is blank,
+don't set them — let commits use the maintainer's ambient git identity.
 
 ## Detection (fleet vs human)
 

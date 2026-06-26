@@ -267,17 +267,26 @@ in the worktree.
 If `.armada/config.json` has a non-blank **`fleetLogin`** (the fleet runs as a GitHub App — see
 [`crows-nest/references/fleet-identity.md`](../crows-nest/references/fleet-identity.md)), set git's
 author/committer **in this worktree, before the first commit**, so commits and the PR are authored by
-the bot, not the maintainer:
+the bot, not the maintainer.
+
+**Scope it to the worktree — never write the shared `.git/config`.** A plain `git config user.name`
+in a build worktree writes to the **shared** repo config (worktrees share `.git/config` unless
+`extensions.worktreeConfig` is enabled), so it **leaks the bot identity into the maintainer's main
+checkout** — their next hand commit would be mis-authored as the bot. Always set the identity
+**worktree-locally** with `--worktree` (enabling the extension first, which is a harmless repo-wide
+flag):
 
 ```bash
 # fleetLogin and the bot's numeric user id (gh api users/<fleetLogin> --jq .id; stable per App)
-git config user.name  "<fleetLogin>"                                              # e.g. lc-armada-fleet[bot]
-git config user.email "<bot-user-id>+<fleetLogin>@users.noreply.github.com"       # e.g. 296802139+lc-armada-fleet[bot]@users.noreply.github.com
+git config extensions.worktreeConfig true                                          # per-worktree config (one-time; safe to re-run)
+git config --worktree user.name  "<fleetLogin>"                                    # e.g. lc-armada-fleet[bot]
+git config --worktree user.email "<bot-user-id>+<fleetLogin>@users.noreply.github.com"   # e.g. 296802139+lc-armada-fleet[bot]@users.noreply.github.com
 ```
 
-If `fleetLogin` is blank, **skip this** — commits use the maintainer's ambient git identity, exactly
-as before. (All `gh`/`git push` writes below are likewise wrapped with an App token only when
-`fleetLogin` is set; see fleet-identity.md's write-wrapping convention.)
+This keeps the bot identity in `.git/worktrees/<wt>/config.worktree`, invisible to the maintainer's
+checkout and other worktrees. If `fleetLogin` is blank, **skip this** — commits use the maintainer's
+ambient git identity, exactly as before. (All `gh`/`git push` writes below are likewise wrapped with
+an App token only when `fleetLogin` is set; see fleet-identity.md's write-wrapping convention.)
 
 ## 5. Implement
 
