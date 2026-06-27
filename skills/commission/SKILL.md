@@ -68,6 +68,7 @@ overwriting** — the user may have hand-tuned it.
   "fleetLogin": "",                // "" = fleet & human share `gh`'s login (detect by marker). Set to a GitHub App bot login (e.g. "my-app[bot]") to give the fleet its OWN identity → author-based detection. See crows-nest/references/fleet-identity.md.
   "authors": "",                   // "" = act on anyone; "alice" or "alice,bob" to restrict by author
   "autoMerge": false,              // ready-PR pipeline may merge? Default false: stop-before-merge.
+  "autoAddressReview": "all",      // how far the pipeline AUTO-FIXES review findings (independent of autoMerge): "off"(review-only) | "blocking" | "major" | "all". Default "all". See crows-nest §1/§4.2.
   "notify": "terminal",            // ship's bell: "off" | "blocked" | "terminal" | "all". Default "terminal" (shipped + blocked).
   "bellCommand": "",               // optional local command the bell also runs (focus-independent alert). Default "" = off. See crows-nest §8e.
   "mergeMethod": "squash",         // merge | squash | rebase, when autoMerge is true

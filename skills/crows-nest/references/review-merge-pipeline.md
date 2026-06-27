@@ -70,14 +70,30 @@ no-review-at-all case as "not safe to merge", never as "no findings".
 
 ## 4.2 Address (subagent)
 
-If there are findings to act on, re-dispatch [`shipwright`](../../shipwright/SKILL.md) in
-**address-review mode** as a subagent against PR `<n>`, handing it the findings. Shipwright triages
-each comment (agree / discuss / disagree + one-line rationale), implements the agreed changes,
-re-validates, pushes to the PR branch, and replies per thread — see shipwright's
+**Filter the findings by the `autoAddressReview` threshold (config, default `"all"`; SKILL.md §1)
+before acting.** This key — *not* `autoMerge` — decides how far the pipeline **auto-fixes**:
+
+- `"off"` → **do not auto-address at all.** Skip straight to §4.5; the pipeline posts the findings +
+  the `✅ reviewed` marker and returns `ready_awaiting_human`. Fixes then happen only via the §3a
+  re-engage path (a human reply). This is the review-only mode.
+- `"blocking"` / `"major"` / `"all"` → hand shipwright **only the findings at or above that severity**
+  (`blocking` ≥ `major` ≥ `minor` ≥ `nit`): `"blocking"` = blocking only, `"major"` = blocking+major,
+  `"all"` = every finding. Findings **below** the threshold are **left as advisory comments** (already
+  posted by muster) — not actioned, not dropped.
+
+If, after filtering, there are findings to act on, re-dispatch [`shipwright`](../../shipwright/SKILL.md)
+in **address-review mode** as a subagent against PR `<n>`, handing it **the in-threshold findings**.
+Shipwright triages each (agree / discuss / disagree + one-line rationale), implements the agreed
+changes, re-validates, pushes to the PR branch, and replies per thread — see shipwright's
 [address-review mode](../../shipwright/references/address-review-mode.md). It returns a structured
 result: what it changed, what it declined and why, and the new head sha.
 
-If `muster` found nothing actionable, skip straight to verify.
+`autoAddressReview` is **independent of `autoMerge`**: auto-fixing up to the threshold happens with
+`autoMerge: false` too — the pipeline fixes, re-validates, and still stops at awaiting-human (§4.5)
+for a human to merge. The address↔review loop remains bounded by `maxReviewRounds`.
+
+If `muster` found nothing actionable (or nothing at/above the threshold, and the key isn't `"off"`),
+skip straight to verify.
 
 ## 4.3 Verify (re-validate)
 

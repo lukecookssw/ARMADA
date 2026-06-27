@@ -98,6 +98,21 @@ Read `.armada/config.json` from the target repo:
 - `autoMerge` — whether the ready-PR pipeline may perform the final merge. **Default `false`**: with
   it off the pipeline reviews, addresses, and re-validates but **stops before merging** (§4.5). Only
   `true` lets the lookout merge, and only when every other gate passes. See [Safety](#7-stopping-and-safety).
+- `autoAddressReview` — **how far the pipeline auto-fixes review findings** before parking at
+  awaiting-human (§4.2). This is **independent of `autoMerge`**: it governs *fixing*, never *merging* —
+  with `autoMerge: false` the pipeline still auto-fixes up to this threshold, re-validates, and stops
+  for a human to merge. A severity threshold: `"off" | "blocking" | "major" | "all"`, **default
+  `"all"`** (the historical behaviour — the address stage implements every finding it agrees with):
+  - `"off"` — **review-only**: post findings + the `✅ reviewed` marker and stop; fixes happen **only**
+    when a human replies (the §3a re-engage path). Use when you want to vet every finding yourself.
+  - `"blocking"` — auto-fix only **blocking** findings; leave major/minor/nit as advisory comments.
+  - `"major"` — auto-fix **blocking + major**; leave minor/nit as comments.
+  - `"all"` *(default)* — auto-fix **everything the address agent agrees with** (it still triages and
+    may decline); minor/nit included. Most automated, more PR churn.
+
+  Findings **below** the threshold are still **posted as advisory comments** — they're not actioned,
+  not dropped. The address↔review loop stays bounded by `maxReviewRounds`, and a human still gates the
+  merge (`autoMerge`). Read it now; the pipeline applies it in §4.2.
 - `notify` — the **ship's bell**: which terminal/exception fleet events emit a one-line
   `PushNotification`, so you're *told* what the fleet did instead of polling labels. One of
   `"off" | "blocked" | "terminal" | "all"`, **default `"terminal"`**:
